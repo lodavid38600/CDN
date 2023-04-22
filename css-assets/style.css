@@ -249,7 +249,7 @@ button {
      width: 100%;
      float: left;
      font-size: 50px;
-     color: #fdfdfe;
+     color: black;
      text-align: center;
      padding-bottom: 40px;
      font-family: Baloo Chettan;
@@ -260,7 +260,7 @@ button {
     width: 49%;
     margin: 0 auto;
     font-size: 30px;
-    color: #fdfdfe;
+    color: black;
     text-align: center;
     font-weight: 600;
 }
