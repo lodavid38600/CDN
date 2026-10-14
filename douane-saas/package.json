@@ -1,0 +1,16 @@
+{
+  "name": "douane-saas",
+  "version": "1.0.0",
+  "private": true,
+  "description": "SaaS de données douanières Eurostat par code NC (Node, Express, Vue, MongoDB)",
+  "scripts": {
+    "install:all": "npm --prefix server install && npm --prefix client install",
+    "dev:server": "npm --prefix server run dev",
+    "dev:client": "npm --prefix client run dev",
+    "build": "npm --prefix client run build",
+    "start": "npm --prefix server start",
+    "seed": "npm --prefix server run seed",
+    "import:eurostat": "npm --prefix server run import:eurostat --",
+    "test": "npm --prefix server test"
+  }
+}
