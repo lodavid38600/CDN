@@ -144,6 +144,18 @@ npm run dev:client      # interface sur http://localhost:5173
 
 Compte de démonstration : **demo@douane-saas.eu / demo12345** (offre Pro).
 
+### Avec les vraies données Eurostat (sans démo)
+
+```bash
+npm run install:all
+cp server/.env.example server/.env        # NODE_ENV=production, JWT_SECRET, CORS_ORIGIN=http://localhost:4000
+docker run -d --name douane-mongo -p 27017:27017 -v douane-mongo:/data/db mongo:7
+npm run bulk:sync -- --from 2026-06 --to 2026-06   # 1 mois pour vérifier
+npm run bulk:sync -- --from 2024-09                # puis 2 ans
+npm run user:create -- --email moi@exemple.fr --password "motdepasse" --admin --pro
+npm run build && npm start                          # http://localhost:4000
+```
+
 ### Production
 
 ```bash

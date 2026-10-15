@@ -13,7 +13,8 @@
     "test": "node --test --test-concurrency=1 \"test/**/*.test.js\"",
     "nc:sync": "node src/scripts/ncSync.js",
     "update": "node src/scripts/update.js",
-    "bulk:sync": "node src/scripts/bulkSync.js"
+    "bulk:sync": "node src/scripts/bulkSync.js",
+    "user:create": "node src/scripts/createUser.js"
   },
   "engines": {
     "node": ">=20"

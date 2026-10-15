@@ -11,6 +11,9 @@
     "start": "npm --prefix server start",
     "seed": "npm --prefix server run seed",
     "import:eurostat": "npm --prefix server run import:eurostat --",
-    "test": "npm --prefix server test"
+    "test": "npm --prefix server test",
+    "bulk:sync": "npm --prefix server run bulk:sync --",
+    "user:create": "npm --prefix server run user:create --",
+    "update": "npm --prefix server run update --"
   }
 }
