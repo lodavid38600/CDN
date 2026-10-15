@@ -1,12 +1,11 @@
-import { ALL_COUNTRIES } from '../data/countries.js';
+import { countryLabel } from '../data/countries.js';
 import { CHAPTERS, SECTIONS } from '../data/nomenclature.js';
 import { Product } from '../models/Product.js';
 import { Nomenclature } from '../models/Nomenclature.js';
 
-const COUNTRY_NAMES = Object.fromEntries(ALL_COUNTRIES.map((c) => [c.code, c.name]));
 const SECTION_NAMES = Object.fromEntries(SECTIONS.map((s) => [s.code, s.label]));
 
-export const countryName = (code) => COUNTRY_NAMES[code] || code;
+export const countryName = (code) => countryLabel(code);
 export const chapterName = (code) => CHAPTERS[code] || `Chapitre ${code}`;
 export const sectionName = (code) => SECTION_NAMES[code] || `Section ${code}`;
 

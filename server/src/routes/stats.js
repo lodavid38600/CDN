@@ -430,11 +430,8 @@ router.get('/mirror', async (req, res) => {
   const s = await buildScope({ ...base, from: eff.from, to: eff.to }, { ...opts, omit: ['flow'] });
   const rows = await WorldFlow.aggregate([
     {
-      $match: {
-        ...s.match,
-        mirror: { $ne: true },
-        $or: [{ reporter: a, partner: b }, { reporter: b, partner: a }],
-      },
+      // $and : le filtre produit peut lui-même contenir un $or (codes actuels / anciens codes)
+      $match: { $and: [s.match, { mirror: { $ne: true } }, { $or: [{ reporter: a, partner: b }, { reporter: b, partner: a }] }] },
     },
     ...s.pre,
     { $group: { _id: { r: '$reporter', f: '$flow', y: '$year' }, v: { $sum: '$valueEur' }, q: { $sum: '$quantityKg' }, src: { $addToSet: '$source' } } },

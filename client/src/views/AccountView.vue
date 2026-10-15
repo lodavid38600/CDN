@@ -37,6 +37,7 @@ const links = computed(() => {
   for (const l of status.value?.links || []) if (l._id.level === 8) out[l._id.source] = l.n;
   return out;
 });
+const BULK_LABEL = { processed: 'chargé(s)', failed: 'en échec', missing: 'non publié(s)' };
 const STATUS_LABEL = { success: 'réussie', partial: 'partielle', failed: 'en échec', running: 'en cours' };
 const SOURCE_LABEL = { eurostat: 'Eurostat', 'us-census': 'US Census', 'uk-hmrc': 'HMRC', ssb: 'SSB', comtrade: 'UN Comtrade', mirror: 'Miroirs' };
 
@@ -61,8 +62,8 @@ const plans = [
       </section>
       <section class="card">
         <h2>Sources</h2>
-        <p class="secondary">Les données proviennent de la base <strong>Comext</strong> d'Eurostat (commerce international de marchandises de l'UE, nomenclature combinée à 8 chiffres). Valeurs en euros courants, quantités en kilogrammes. Flux « extra-UE » : échanges des 27 États membres avec les pays tiers.</p>
-        <p class="muted">Les données de démonstration sont simulées à partir de codes NC réels ; lancez l'import Eurostat pour charger les données officielles.</p>
+        <p class="secondary">Les données proviennent des <strong>fichiers bulk Comext</strong> d'Eurostat (base constituée et mise à jour par fichiers mensuels complets, sans dépendre des limites de l'API) (commerce international de marchandises de l'UE, nomenclature combinée à 8 chiffres). Valeurs en euros courants, quantités en kilogrammes. Flux « extra-UE » : échanges des 27 États membres avec les pays tiers.</p>
+        <p class="muted">Les données de démonstration sont simulées à partir de codes NC réels ; lancez « npm run bulk:sync » pour charger les données officielles.</p>
       </section>
     </div>
     <section class="card" style="margin-top: 16px">
@@ -111,6 +112,22 @@ const plans = [
               </tbody>
             </table>
             <p class="hint" style="margin-top: 8px">Mise à jour automatique : {{ status.autoUpdate.enabled ? `activée (toutes les ${status.autoUpdate.intervalHours} h, ${status.autoUpdate.months} derniers mois)` : 'désactivée (AUTO_UPDATE=true pour l\'activer)' }}<span v-if="status.autoUpdate.worldSources.length"> · sources : {{ status.autoUpdate.worldSources.join(', ') }}</span></p>
+            <template v-if="status.bulk">
+              <h3>Fichiers bulk Eurostat</h3>
+              <p class="hint">Source principale de la base (depuis {{ status.bulk.from }}) : seuls les fichiers nouveaux ou révisés sont retéléchargés.
+                <span v-for="c in status.bulk.counts" :key="c._id"> · {{ c.n }} {{ BULK_LABEL[c._id] || c._id }}<template v-if="c._id === 'processed'"> (jusqu'à {{ c.last }})</template></span>
+                <span v-if="!status.bulk.counts.length"> · aucun fichier chargé pour l'instant (npm run bulk:sync).</span>
+              </p>
+              <table v-if="status.bulk.files.length">
+                <tbody>
+                  <tr v-for="f in status.bulk.files.slice(0, 8)" :key="f._id">
+                    <td>{{ f.period || f.name }}</td>
+                    <td><span class="badge" :class="{ ok: f.status === 'processed', ko: f.status === 'failed' }">{{ BULK_LABEL[f.status] || f.status }}</span></td>
+                    <td class="num">{{ f.status === 'processed' ? `${integer(f.stats?.kept || 0)} lignes` : f.error }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </template>
             <template v-if="status.rejectedReasons.length">
               <h3>Motifs de quarantaine</h3>
               <ul class="reasons"><li v-for="r in status.rejectedReasons" :key="r._id">{{ r._id }} <span class="muted">({{ r.n }})</span></li></ul>

@@ -1,66 +1,59 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { computed, ref, watch } from 'vue';
 import { api } from '../api.js';
-import { eur, tonnes, perKg, percent, sharePct, rangeLabel, ncCode, integer } from '../format.js';
+import { eur, tonnes, perKg, percent, sharePct, rangeLabel, integer } from '../format.js';
 import { useMetaStore } from '../stores/meta.js';
 import { useReportsStore } from '../stores/reports.js';
 import { priceBoxSpec, priceScatterSpec, priceTrendSpec, hbarHeight } from '../lib/specs.js';
-import NcSearch from '../components/NcSearch.vue';
-import PeriodPicker from '../components/PeriodPicker.vue';
-import ChartCard from '../components/ChartCard.vue';
-import KpiCard from '../components/KpiCard.vue';
-import Flag from '../components/Flag.vue';
-import NcHistory from '../components/NcHistory.vue';
+import ChartCard from './ChartCard.vue';
+import KpiCard from './KpiCard.vue';
+import Flag from './Flag.vue';
 
-// Analyse des prix unitaires (€/kg) et des volumes d'un produit, pays par pays.
-// Questions auxquelles la page répond sans réglage : qui exporte au prix médian le plus bas,
-// le plus haut, avec quels volumes, et comment le prix évolue.
-const route = useRoute();
-const router = useRouter();
+// Prix unitaires (€/kg) et volumes d'un produit, pays par pays, intégrés à la fiche NC.
+// Répond sans réglage : qui exporte au prix médian le plus bas, le plus haut, avec quels volumes,
+// et comment le prix évolue. Les filtres (période, pays, codes bruts) sont ceux de la fiche.
+const props = defineProps({
+  product: { type: String, required: true },
+  label: { type: String, default: '' },
+  from: { type: String, default: '' },
+  to: { type: String, default: '' },
+  reporters: { type: Array, default: () => [] },
+  partners: { type: Array, default: () => [] },
+  raw: { type: Boolean, default: false },
+  flow: { type: String, default: '' }, // flux choisi sur la fiche ('' = les deux → export par défaut)
+});
 const meta = useMetaStore();
 const reports = useReportsStore();
 
-const product = ref(String(route.query.product || '22042109'));
-const flow = ref(route.query.flow === 'import' ? 'import' : 'export');
-const scope = ref(['eu', 'partner', 'world'].includes(route.query.scope) ? route.query.scope : 'eu');
-const period = ref({ from: String(route.query.periodFrom || ''), to: String(route.query.periodTo || '') });
+const flow = ref(props.flow === 'import' ? 'import' : 'export');
+watch(() => props.flow, (f) => { if (f) flow.value = f; });
+const scope = ref('eu');
 const data = ref(null);
-const info = ref(null);
 const loading = ref(false);
 const error = ref('');
 const sortBy = ref('median');
 const sortDir = ref(1);
-const raw = ref(false);
 
 // Point de vue : pays UE (déclarants), partenaires hors UE, ou tous les pays (données mondiales)
 const SCOPES = computed(() => [
   { id: 'eu', label: flow.value === 'export' ? 'Pays UE exportateurs' : 'Pays UE importateurs', dimension: 'reporter', source: 'eu' },
-  { id: 'partner', label: flow.value === 'export' ? 'Pays hors UE clients' : 'Pays hors UE fournisseurs', dimension: 'partner', source: 'eu' },
+  { id: 'partner', label: flow.value === 'export' ? 'Clients hors UE' : 'Fournisseurs hors UE', dimension: 'partner', source: 'eu' },
   { id: 'world', label: flow.value === 'export' ? 'Tous les exportateurs (monde)' : 'Tous les importateurs (monde)', dimension: 'reporter', source: 'world' },
 ]);
 const scopeDef = computed(() => SCOPES.value.find((s) => s.id === scope.value));
 
 async function load() {
-  if (!product.value || product.value.length < 6) {
-    data.value = null;
-    return;
-  }
   loading.value = true;
   error.value = '';
   try {
-    await meta.load();
-    const params = {
-      product: product.value, flow: flow.value, dimension: scopeDef.value.dimension, source: scopeDef.value.source,
-      periodFrom: period.value.from, periodTo: period.value.to, nc: raw.value ? 'brut' : undefined,
-    };
-    const [d, i] = await Promise.all([
-      api('/stats/prices', { params }),
-      product.value.length === 8 ? api(`/products/${product.value}`) : api(`/nomenclature/${product.value.slice(0, 6)}`),
-    ]);
-    data.value = d;
-    info.value = i;
-    router.replace({ query: { product: product.value, flow: flow.value, scope: scope.value, periodFrom: period.value.from || undefined, periodTo: period.value.to || undefined } });
+    const world = scopeDef.value.source === 'world';
+    data.value = await api('/stats/prices', {
+      params: {
+        product: world ? props.product.slice(0, 6) : props.product, flow: flow.value, dimension: scopeDef.value.dimension, source: scopeDef.value.source,
+        periodFrom: props.from, periodTo: props.to, nc: props.raw ? 'brut' : undefined,
+        reporters: world ? undefined : props.reporters, partners: world ? undefined : props.partners,
+      },
+    });
   } catch (e) {
     error.value = e.message;
     data.value = null;
@@ -68,11 +61,8 @@ async function load() {
     loading.value = false;
   }
 }
-watch([product, flow, scope, raw], load);
-watch(period, load, { deep: true });
-onMounted(load);
+watch(() => [props.product, props.from, props.to, props.raw, props.reporters.join(), props.partners.join(), flow.value, scope.value], load, { immediate: true });
 
-const title = computed(() => (info.value ? `${ncCode(product.value)} — ${info.value.description || info.value.label}` : ncCode(product.value)));
 const groups = computed(() => data.value?.groups || []);
 const o = computed(() => data.value?.overall);
 const cheapest = computed(() => groups.value[0]);
@@ -90,7 +80,7 @@ function sort(k) {
   }
 }
 const COLS = [
-  ['quantityKg', 'Volume', tonnes], ['valueEur', 'Valeur', eur], ['mean', 'Prix moyen', perKg], ['median', 'Prix médian', perKg],
+  ['quantityKg', 'Volume', tonnes], ['share', 'Part vol.', sharePct], ['valueEur', 'Valeur', eur], ['mean', 'Prix moyen', perKg], ['median', 'Prix médian', perKg],
   ['p25', 'P25', perKg], ['p75', 'P75', perKg], ['min', 'Min', perKg], ['max', 'Max', perKg],
   ['vsMedian', 'Écart au médian', (v) => percent(v)], ['spread', 'Dispersion', (v) => (v === null ? '—' : sharePct(v))], ['observations', 'Obs.', integer],
 ];
@@ -98,21 +88,21 @@ const COLS = [
 const boxSpec = computed(() => priceBoxSpec({
   groups: groups.value.slice(0, 40),
   title: `Prix ${flow.value === 'export' ? 'à l\'export' : 'à l\'import'} par pays — du moins cher au plus cher`,
-  subtitle: `${title.value} · ${periodText.value} · boîte = 50 % des volumes (P25–P75), trait = médiane`,
+  subtitle: `${props.label} · ${periodText.value} · boîte = 50 % des volumes (P25–P75), trait = médiane`,
 }));
 const scatterSpec = computed(() => priceScatterSpec({
   groups: groups.value, eu: meta.euCodes,
   title: 'Positionnement prix / volume',
-  subtitle: `Chaque point est un pays · taille = volume · ${scope.value === 'world' ? 'bleu : UE, orange : hors UE' : ''}`,
+  subtitle: `Chaque point est un pays · taille = volume${scope.value === 'world' ? ' · bleu : UE, orange : hors UE' : ''}`,
 }));
-const trendSpecC = computed(() => (data.value ? priceTrendSpec({
+const trendSpecC = computed(() => (data.value?.periods?.length ? priceTrendSpec({
   periods: data.value.periods, title: 'Évolution du prix médian (mois par mois)',
   subtitle: `Bande : 50 % des volumes échangés (P25–P75) · pointillés : prix moyen · ${periodText.value}`,
 }) : null));
 
 function addToReport() {
   reports.add([
-    { type: 'heading', text: `Prix — ${title.value}`, level: 1 },
+    { type: 'heading', text: `Prix et volumes — ${props.label}`, level: 2 },
     {
       type: 'kpis',
       items: [
@@ -123,28 +113,20 @@ function addToReport() {
       ],
     },
     { type: 'chart', spec: JSON.parse(JSON.stringify(boxSpec.value)) },
-    { type: 'chart', spec: JSON.parse(JSON.stringify(trendSpecC.value)) },
+    ...(trendSpecC.value ? [{ type: 'chart', spec: JSON.parse(JSON.stringify(trendSpecC.value)) }] : []),
     {
-      type: 'table', title: `Prix par pays (${flowWord.value})`,
+      type: 'table', title: `Prix par pays (${flowWord.value} · ${scopeDef.value.label})`,
       columns: ['Pays', 'Volume', 'Prix moyen', 'Prix médian', 'P25', 'P75', 'Écart au médian'],
       rows: groups.value.map((g) => [g.label, tonnes(g.quantityKg), perKg(g.mean), perKg(g.median), perKg(g.p25), perKg(g.p75), percent(g.vsMedian)]),
     },
   ], 'Prix');
 }
+defineExpose({ addToReport, ready: () => !!o.value });
 </script>
 
 <template>
   <div>
-    <div class="page-head">
-      <div>
-        <h1>Prix & volumes</h1>
-        <p>Qui {{ flow === 'export' ? 'exporte' : 'importe' }} au prix le plus bas, le plus haut, avec quels volumes ? Prix unitaires en €/kg, calculés sur chaque déclaration mensuelle.</p>
-      </div>
-      <button class="btn btn-primary" :disabled="!o" @click="addToReport">＋ Ajouter au rapport</button>
-    </div>
-
     <div class="card toolbar">
-      <div class="field grow"><span>Produit (code NC à 6 ou 8 chiffres)</span><NcSearch v-model="product" /></div>
       <div class="field"><span>Flux</span>
         <div class="seg">
           <button :class="{ on: flow === 'export' }" @click="flow = 'export'">Exportations</button>
@@ -156,12 +138,9 @@ function addToReport() {
           <button v-for="s in SCOPES" :key="s.id" :class="{ on: scope === s.id }" @click="scope = s.id">{{ s.label }}</button>
         </div>
       </div>
-      <div class="field"><span>Période</span><PeriodPicker v-model:from="period.from" v-model:to="period.to" /></div>
+      <button class="btn btn-sm push" :disabled="!o" @click="addToReport">＋ Prix au rapport</button>
     </div>
     <p v-if="error" class="error">{{ error }}</p>
-    <p v-if="product.length < 6" class="empty card">Choisissez un produit (code à 6 ou 8 chiffres) : comparer des prix entre produits différents n'aurait pas de sens.</p>
-
-    <NcHistory v-if="info?.history" v-model:raw="raw" :history="info.history" :code="product" />
 
     <template v-if="data && o">
       <div class="kpis" :class="{ loading }">
@@ -197,7 +176,7 @@ function addToReport() {
 
       <section class="card" style="margin-top: 16px">
         <div class="card-head">
-          <div><h2>Tous les pays ({{ groups.length }})</h2><p>{{ scopeDef.label }} · {{ periodText }} · cliquer sur une colonne pour trier · {{ o.outliers }} valeur(s) aberrante(s) écartée(s) des bornes</p></div>
+          <div><h2>Prix et volumes de tous les pays ({{ groups.length }})</h2><p>{{ scopeDef.label }} · {{ periodText }} · cliquer sur une colonne pour trier · {{ o.outliers }} valeur(s) aberrante(s) écartée(s) des bornes</p></div>
         </div>
         <div class="table-wrap">
           <table>
@@ -221,13 +200,13 @@ function addToReport() {
         <p class="hint" style="margin-top: 8px">Prix médian : prix auquel s'échange la moitié des volumes. Dispersion : (P75 − P25) / médiane. Les déclarations au prix unitaire aberrant (au-delà de 3 écarts interquartiles, en échelle logarithmique) sont comptées mais exclues des minimums, maximums et quartiles.</p>
       </section>
     </template>
-    <p v-else-if="!loading && product.length >= 6 && !error" class="empty card">Aucune donnée de prix pour ce produit sur la période.</p>
+    <p v-else-if="!loading && !error" class="empty card">Aucune donnée de prix pour ce produit sur la période.</p>
   </div>
 </template>
 
 <style scoped>
 .toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-bottom: 16px; }
-.grow { flex: 1; min-width: 260px; }
+.push { margin-left: auto; }
 .kpi-country { padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; }
 .kl { font-size: 0.78rem; color: var(--text-2); font-weight: 500; }
 .kc { display: flex; gap: 8px; align-items: center; font-size: 1.05rem; }

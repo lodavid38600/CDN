@@ -21,10 +21,21 @@ import Flag from '../components/Flag.vue';
 import PeriodDrawer from '../components/PeriodDrawer.vue';
 import GranularityPicker from '../components/GranularityPicker.vue';
 import PeriodTable from '../components/PeriodTable.vue';
+import PriceAnalysis from '../components/PriceAnalysis.vue';
+import WorldMarket from '../components/WorldMarket.vue';
+import SectionNav from '../components/SectionNav.vue';
 import { bestGranularity, granularities, GRANULARITY_WORD } from '../lib/granularity.js';
 
-// Fiche complète d'un code NC8 : indicateurs, tendances, prévision, saisonnalité,
-// prix unitaires, carte des partenaires, classements et matrice déclarants × partenaires.
+// Fiche complète d'un code NC8, toutes les données sur une seule page : indicateurs, valeurs,
+// volumes, prix (moyen, médian, quartiles, pays les moins / plus chers), tendances, prévision,
+// saisonnalité, carte et classements des partenaires, matrice, marché mondial et miroirs.
+const SECTIONS = [
+  { id: 'synthese', label: 'Synthèse' },
+  { id: 'evolution', label: 'Évolution' },
+  { id: 'prix', label: 'Prix & volumes' },
+  { id: 'pays', label: 'Pays partenaires' },
+  { id: 'monde', label: 'Marché mondial' },
+];
 const props = defineProps({ code: { type: String, required: true } });
 const route = useRoute();
 const router = useRouter();
@@ -203,6 +214,11 @@ async function generateReport() {
     { type: 'chart', spec: trend.value },
     { type: 'chart', spec: seasonSpec.value },
     { type: 'chart', spec: priceSpec.value },
+    ...(priceBox.value ? [{ type: 'chart', spec: JSON.parse(JSON.stringify(priceBox.value)) }, {
+      type: 'table', title: `Prix par pays (${prices.value.flow === 'import' ? 'importations, fournisseurs hors UE' : 'exportations, pays UE'})`,
+      columns: ['Pays', 'Volume', 'Prix moyen', 'Prix médian', 'P25', 'P75', 'Écart au médian'],
+      rows: prices.value.groups.map((g) => [g.label, tonnes(g.quantityKg), perKg(g.mean), perKg(g.median), perKg(g.p25), perKg(g.p75), percent(g.vsMedian)]),
+    }] : []),
     ...(mapImg ? [{ type: 'image', src: mapImg, caption: `Carte des ${mapMode.value === 'partner' ? 'partenaires hors UE' : 'pays UE déclarants'} — ${periodText.value}` }] : []),
     { type: 'chart', spec: partnerSpec.value },
     rankTableBlock(partners.value.slice(0, 15), 'Détail par partenaire hors UE', { measure: measure.value }),
@@ -254,6 +270,8 @@ async function addMapToReport() {
 
       <NcHistory v-model:raw="raw" :history="product.history" :code="code" />
 
+      <SectionNav :sections="SECTIONS" />
+
       <div class="card toolbar">
         <div class="field wide"><span>Période</span><PeriodPicker v-model:from="local.from" v-model:to="local.to" /></div>
         <div class="field"><span>Flux</span>
@@ -270,6 +288,7 @@ async function addMapToReport() {
         </div>
       </div>
 
+      <div id="synthese" class="anchor" />
       <div v-if="summary" class="kpis" :class="{ loading }">
         <KpiCard v-for="k in kpis" :key="k.dot" v-bind="k" :spark="monthly.slice(-24).map((r) => r[`${k.dot}${mk}`])" :spark-color="`var(--${k.dot})`" />
         <KpiCard label="Solde commercial" :value="`${summary.balanceEur >= 0 ? '+' : ''}${eur(summary.balanceEur)}`" :sub="`Couverture ${summary.importEur ? sharePct(summary.exportEur / summary.importEur) : '—'}`" />
@@ -287,7 +306,8 @@ async function addMapToReport() {
         </div>
       </div>
 
-      <div style="margin-top: 16px">
+      <h2 id="evolution" class="sec-title">Évolution des valeurs, volumes et prix</h2>
+      <div>
         <ChartCard :spec="trend" :height="320" pickable :loading="loading" @pick="(i) => (drawer = series[i]?.period || '')">
           <template #controls>
             <GranularityPicker v-model="granularity" :from="local.from" :to="local.to" />
@@ -311,28 +331,11 @@ async function addMapToReport() {
         <ChartCard :spec="priceSpec" :height="240" :loading="loading" />
       </div>
 
-      <div v-if="priceBox" class="grid grid-2" style="margin-top: 16px">
-        <ChartCard :spec="priceBox" :height="hbarHeight(Math.min(30, prices.groups.length), 1) + 20" />
-        <section class="card">
-          <div class="card-head">
-            <div><h2>Prix médian le plus bas / le plus haut</h2><p>{{ prices.flow === 'import' ? 'Fournisseurs hors UE' : 'Pays UE exportateurs' }} · pondéré par les volumes</p></div>
-            <RouterLink class="btn btn-sm" :to="{ path: '/prix', query: { product: code, flow: prices.flow, scope: prices.flow === 'import' ? 'partner' : 'eu' } }">Analyse complète →</RouterLink>
-          </div>
-          <h3 class="ext-h">Les moins chers</h3>
-          <ol class="extremes">
-            <li v-for="g in prices.groups.slice(0, 5)" :key="'l' + g.key"><Flag :code="g.key" /> <span>{{ g.label }}</span><strong>{{ perKg(g.median) }}</strong><span class="muted small">{{ tonnes(g.quantityKg) }}</span></li>
-          </ol>
-          <template v-if="prices.groups.length > 5">
-            <h3 class="ext-h">Les plus chers</h3>
-            <ol class="extremes">
-              <li v-for="g in [...prices.groups].reverse().slice(0, Math.min(5, prices.groups.length - 5))" :key="'h' + g.key"><Flag :code="g.key" /> <span>{{ g.label }}</span><strong>{{ perKg(g.median) }}</strong><span class="muted small">{{ tonnes(g.quantityKg) }}</span></li>
-            </ol>
-          </template>
-          <p class="hint" style="margin-top: 10px">Prix moyen global : {{ perKg(prices.overall.mean) }} · médian : {{ perKg(prices.overall.median) }} · {{ prices.overall.observations }} déclarations mensuelles</p>
-        </section>
-      </div>
+      <h2 id="prix" class="sec-title">Prix & volumes par pays</h2>
+      <PriceAnalysis :product="code" :label="reportTitle" :from="local.from" :to="local.to" :reporters="local.reporters" :partners="local.partners" :raw="raw" :flow="local.flow" />
 
-      <section class="card" style="margin-top: 16px">
+      <h2 id="pays" class="sec-title">Pays partenaires et déclarants</h2>
+      <section class="card">
         <div class="card-head">
           <div><h2>Carte des échanges</h2><p>{{ product.description }} · {{ periodText }} · cliquer sur un pays pour filtrer</p></div>
           <div class="row">
@@ -374,6 +377,9 @@ async function addMapToReport() {
           <template v-if="reporters[0]"> Côté UE, <strong>{{ reporters[0].label }}</strong> concentre {{ sharePct(reporters[0].totalEur / (summary.totalEur || 1)) }} du commerce extra-UE.</template>
         </p>
       </section>
+
+      <h2 id="monde" class="sec-title">Marché mondial · SH {{ ncCode(code.slice(0, 6)) }}</h2>
+      <WorldMarket :code="code" :from="local.from" :to="local.to" :measure="measure" :flow="local.flow" />
     </template>
     <PeriodDrawer :period="drawer" :params="{ product: code, reporters: local.reporters, partners: local.partners }" :context="`NC ${ncCode(code)}`" @close="drawer = ''" />
   </div>
@@ -393,6 +399,8 @@ async function addMapToReport() {
 .extremes li { display: grid; grid-template-columns: auto 1fr auto 80px; gap: 8px; align-items: center; }
 .extremes .small { text-align: right; }
 .ext-h { margin: 10px 0 6px; font-size: 0.76rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.sec-title { margin: 32px 0 12px; font-size: 1.25rem; scroll-margin-top: 120px; }
+.anchor { scroll-margin-top: 120px; }
 .insight { display: flex; gap: 12px; align-items: center; margin-top: 16px; background: var(--accent-wash); }
 @media (max-width: 700px) { .wide { grid-column: span 1; } }
 </style>

@@ -193,7 +193,7 @@ const filtersDescription = computed(() => {
       <div class="card-head">
         <div><h2>Codes NC les plus échangés</h2><p>Valeur, volume et prix moyen · nomenclature actuelle (anciens codes convertis automatiquement)</p></div>
         <div class="row">
-          <RouterLink :to="{ path: '/prix', query: { product: products[0]?.key } }" class="btn btn-sm">Analyser les prix →</RouterLink>
+          <RouterLink v-if="products[0]" :to="{ path: `/produits/${products[0].key}`, hash: '#prix' }" class="btn btn-sm">Prix du n° 1 →</RouterLink>
           <RouterLink :to="{ path: '/explorer', query: filters.toQuery() }" class="btn btn-sm">Lignes détaillées →</RouterLink>
         </div>
       </div>

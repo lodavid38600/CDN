@@ -16,9 +16,20 @@ import PeriodDrawer from '../components/PeriodDrawer.vue';
 import NcHistory from '../components/NcHistory.vue';
 import GranularityPicker from '../components/GranularityPicker.vue';
 import PeriodTable from '../components/PeriodTable.vue';
+import PriceAnalysis from '../components/PriceAnalysis.vue';
+import WorldMarket from '../components/WorldMarket.vue';
+import SectionNav from '../components/SectionNav.vue';
 import { bestGranularity, GRANULARITY_WORD } from '../lib/granularity.js';
 
 // Niveau intermédiaire de navigation : chapitre NC02 (enfants NC06) ou sous-position NC06 (enfants NC08).
+// Une sous-position NC06 a sa fiche complète : prix et volumes par pays et marché mondial compris.
+const SECTIONS6 = [
+  { id: 'codes', label: 'Codes NC8' },
+  { id: 'evolution', label: 'Évolution' },
+  { id: 'prix', label: 'Prix & volumes' },
+  { id: 'pays', label: 'Pays partenaires' },
+  { id: 'monde', label: 'Marché mondial' },
+];
 const props = defineProps({ code: { type: String, required: true } });
 const router = useRouter();
 const meta = useMetaStore();
@@ -143,6 +154,8 @@ async function generateReport() {
 
       <NcHistory v-if="node.history" :history="node.history" :code="code" :raw="false" />
 
+      <SectionNav v-if="code.length === 6" :sections="SECTIONS6" />
+
       <div class="card toolbar">
         <div class="field"><span>Période</span><PeriodPicker v-model:from="period.from" v-model:to="period.to" /></div>
         <div class="field"><span>Flux</span>
@@ -162,7 +175,7 @@ async function generateReport() {
         <KpiCard :label="code.length === 2 ? 'Sous-positions NC06' : 'Codes NC8'" :value="String(children.length)" :sub="`${summary.partnerCount} partenaires hors UE`" />
       </div>
 
-      <section class="card" style="margin-bottom: 16px">
+      <section id="codes" class="card anchor" style="margin-bottom: 16px">
         <div class="card-head">
           <div>
             <h2>{{ code.length === 2 ? 'Sous-positions NC06' : 'Codes NC8' }} de {{ ncCode(code) }}</h2>
@@ -185,6 +198,7 @@ async function generateReport() {
         </div>
       </section>
 
+      <div id="evolution" class="anchor" />
       <ChartCard :spec="trend" :height="300" pickable :loading="loading" @pick="(i) => (drawer = series[i]?.period || '')">
         <template #controls><GranularityPicker v-model="granularity" :from="period.from" :to="period.to" /></template>
         <p class="hint" style="margin-top: 8px">💡 Cliquez sur une période pour le détail par pays.</p>
@@ -194,12 +208,23 @@ async function generateReport() {
         <PeriodTable v-model:granularity="granularity" :params="{ product: code }" :from="period.from" :to="period.to" :title="`NC ${ncCode(code)} — détail de la période`" @pick="(p) => (drawer = p)" />
       </div>
 
-      <div class="grid grid-2" style="margin-top: 16px">
+      <template v-if="code.length === 6">
+        <h2 id="prix" class="sec-title">Prix & volumes par pays</h2>
+        <PriceAnalysis :product="code" :label="`${ncCode(code)} — ${node.label}`" :from="period.from" :to="period.to" :flow="flow" />
+      </template>
+
+      <h2 id="pays" class="sec-title">Pays partenaires et déclarants</h2>
+      <div class="grid grid-2">
         <ChartCard :spec="partnerSpec" :height="hbarHeight(partners.length, flow ? 1 : 2)" :loading="loading" />
         <ChartCard :spec="reporterSpec" :height="hbarHeight(reporters.length, flow ? 1 : 2)" :loading="loading" />
         <section class="card"><div class="card-head"><h2>Partenaires hors UE</h2></div><RankTable :rows="partners" :flow="flow" key-label="Pays" /></section>
         <section class="card"><div class="card-head"><h2>Pays UE déclarants</h2></div><RankTable :rows="reporters" :flow="flow" key-label="Pays" /></section>
       </div>
+
+      <template v-if="code.length === 6">
+        <h2 id="monde" class="sec-title">Marché mondial · SH {{ ncCode(code) }}</h2>
+        <WorldMarket :code="code" :from="period.from" :to="period.to" :flow="flow" />
+      </template>
     </template>
     <PeriodDrawer :period="drawer" :params="{ product: code }" :context="`NC ${ncCode(code)}`" @close="drawer = ''" />
   </div>
@@ -207,6 +232,8 @@ async function generateReport() {
 
 <style scoped>
 .title { margin-top: 6px; }
+.sec-title { margin: 32px 0 12px; font-size: 1.25rem; scroll-margin-top: 120px; }
+.anchor { scroll-margin-top: 120px; }
 .code { color: var(--accent); margin-right: 6px; }
 .toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-bottom: 16px; }
 .toolbar .field { min-width: 220px; }

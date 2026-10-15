@@ -106,7 +106,7 @@ const canSwitch = computed(() => b.value.type === 'chart' && b.value.spec.kind !
       </div>
       <Editable v-if="!readonly" class="cs" :model-value="b.spec.subtitle || ''" placeholder="Sous-titre (facultatif)" @update:model-value="(v) => setField(b.spec, 'subtitle', v)" />
       <p v-else-if="b.spec.subtitle" class="cs">{{ b.spec.subtitle }}</p>
-      <ChartLegend v-if="b.spec.series.length > 1" :series="b.spec.series" :kind="b.spec.kind" style="margin: 6px 0" />
+      <ChartLegend v-if="b.spec.series?.length > 1" :series="b.spec.series" :kind="b.spec.kind" style="margin: 6px 0" />
       <DataChart :spec="b.spec" :height="chartHeight" />
       <p v-if="b.spec.note" class="note">{{ b.spec.note }}</p>
     </template>

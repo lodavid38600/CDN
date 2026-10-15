@@ -32,3 +32,36 @@ export const ALL_COUNTRIES = [...EU_COUNTRIES, ...EXTRA_EU_COUNTRIES];
 export const EU_CODES = new Set(EU_COUNTRIES.map((c) => c.code));
 
 export const ALL_CODES = new Set(ALL_COUNTRIES.map((c) => c.code));
+
+// Tous les pays ISO 3166-1 (noms français fournis par les données ICU de Node) :
+// la base accepte n'importe quel partenaire, pas seulement les pays mis en avant ci-dessus.
+const regionNames = new Intl.DisplayNames(['fr'], { type: 'region' });
+// Codes spéciaux Comext : avitaillement, secret statistique, pays non déterminés
+export const SPECIAL_PARTNERS = { QP: 'Haute mer', QQ: 'Avitaillement', QR: 'Avitaillement (UE)', QS: 'Avitaillement (hors UE)', QU: 'Pays non déterminés', QV: 'Pays non déterminés (UE)', QW: 'Pays non déterminés (hors UE)', QX: 'Pays non déterminés (secret)', QY: 'Secret (UE)', QZ: 'Secret (hors UE)' };
+const NAMES = Object.fromEntries(ALL_COUNTRIES.map((c) => [c.code, c.name]));
+
+export function countryLabel(code) {
+  if (NAMES[code]) return NAMES[code];
+  if (SPECIAL_PARTNERS[code]) return SPECIAL_PARTNERS[code];
+  try {
+    return regionNames.of(code) || code;
+  } catch {
+    return code;
+  }
+}
+
+/** Code pays ISO alpha-2 reconnu (ou code spécial Comext). */
+export function isCountryCode(code) {
+  if (!/^[A-Z]{2}$/.test(code || '')) return false;
+  if (ALL_CODES.has(code) || SPECIAL_PARTNERS[code]) return true;
+  // Exclut les agrégats et pseudo-régions (UE, zone euro, ONU, « région indéterminée »…)
+  if (/^(EU|EZ|UN|ZZ|Q[M-Z]|X[A-Z])$/.test(code) && code !== 'XK') return false;
+  try {
+    return regionNames.of(code) !== code;
+  } catch {
+    return false;
+  }
+}
+
+/** Eurostat note la Grèce « EL » et le Royaume-Uni parfois « UK ». */
+export const normalizeCountry = (code) => ({ EL: 'GR', UK: 'GB' })[String(code || '').toUpperCase()] || String(code || '').toUpperCase();

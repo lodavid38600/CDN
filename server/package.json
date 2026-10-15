@@ -12,12 +12,14 @@
     "import:eurostat": "node src/scripts/importEurostat.js",
     "test": "node --test --test-concurrency=1 \"test/**/*.test.js\"",
     "nc:sync": "node src/scripts/ncSync.js",
-    "update": "node src/scripts/update.js"
+    "update": "node src/scripts/update.js",
+    "bulk:sync": "node src/scripts/bulkSync.js"
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
+    "7zip-bin": "^5.2.0",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
     "dotenv": "^18.0.8",

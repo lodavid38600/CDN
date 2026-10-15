@@ -1,6 +1,6 @@
 // Contrôles de qualité appliqués à toute donnée entrante (Eurostat, sources nationales, démo).
 // Une ligne invalide n'est jamais insérée : elle part en quarantaine avec la raison du rejet.
-import { EU_CODES, ALL_CODES } from '../data/countries.js';
+import { EU_CODES, isCountryCode, normalizeCountry } from '../data/countries.js';
 import { sectionOfChapter } from '../data/nomenclature.js';
 import { Rejected } from '../models/System.js';
 
@@ -18,14 +18,14 @@ export function checkFlow(d, { level = 8, now = new Date() } = {}) {
   const warnings = [];
   if (!d || typeof d !== 'object') return { ok: false, errors: ['ligne vide'], warnings };
   const code = String(d.product ?? '').replace(/[\s.]/g, '');
-  const reporter = String(d.reporter ?? '').toUpperCase();
-  const partner = String(d.partner ?? '').toUpperCase();
+  const reporter = normalizeCountry(d.reporter);
+  const partner = normalizeCountry(d.partner);
   const year = Number(d.year);
 
   if (!new RegExp(`^\\d{${level}}$`).test(code)) errors.push(`code produit invalide (${d.product})`);
   if (level === 8 && !EU_CODES.has(reporter)) errors.push(`déclarant hors UE (${d.reporter})`);
-  if (level === 6 && !ALL_CODES.has(reporter)) errors.push(`déclarant inconnu (${d.reporter})`);
-  if (!ALL_CODES.has(partner)) errors.push(`partenaire inconnu (${d.partner})`);
+  if (level === 6 && !isCountryCode(reporter)) errors.push(`déclarant inconnu (${d.reporter})`);
+  if (!isCountryCode(partner)) errors.push(`partenaire inconnu (${d.partner})`);
   if (level === 8 && EU_CODES.has(partner)) errors.push(`partenaire membre de l'UE (${d.partner}) : hors périmètre extra-UE`);
   if (reporter && reporter === partner) errors.push('déclarant identique au partenaire');
   if (!FLOWS.has(d.flow)) errors.push(`flux invalide (${d.flow})`);

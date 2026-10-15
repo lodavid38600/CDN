@@ -6,98 +6,130 @@ Montants de démonstration (codes NC réels, valeurs simulées).
 
 ![Connexion / création de compte, accès au compte démo](01-connexion.png)
 
-## Tableau de bord : question rapide, filtres, indicateurs, évolution avec prévision, classements
+## Vue d'ensemble : phrase de synthèse, indicateurs en valeur, volume et prix, évolution avec prévision
 
-![Tableau de bord : question rapide, filtres, indicateurs, évolution avec prévision, classements](02-tableau-de-bord.png)
+![Vue d'ensemble : phrase de synthèse, indicateurs en valeur, volume et prix, évolution avec prévision](02-vue-d-ensemble.png)
 
-## Sélecteur de période : préréglages et période personnalisée au mois près
+## Sélecteur de période : préréglages et période au mois près
 
-![Sélecteur de période : préréglages et période personnalisée au mois près](03-selecteur-de-periode.png)
+![Sélecteur de période : préréglages et période au mois près](03-selecteur-de-periode.png)
 
-## Vin (NC 2204), France, export, mars 2018 → janvier 2019
+## Vin (NC 2204), France, export, mars 2018 → janvier 2019 : la réponse en une phrase
 
-![Vin (NC 2204), France, export, mars 2018 → janvier 2019](04-tableau-de-bord-filtre-vin-france.png)
+![Vin (NC 2204), France, export, mars 2018 → janvier 2019 : la réponse en une phrase](04-vue-d-ensemble-vin-france-mars-2018-janvier-2019.png)
 
-## Clic sur un mois du graphique : détail des échanges avec drapeaux
+## La même question en volume (tonnes, unité adaptée)
 
-![Clic sur un mois du graphique : détail des échanges avec drapeaux](05-detail-d-un-mois.png)
+![La même question en volume (tonnes, unité adaptée)](05-vue-d-ensemble-en-volume.png)
 
-## Grille des 96 chapitres NC02 par section
+## Clic sur une colonne du graphique : détail du mois avec drapeaux
 
-![Grille des 96 chapitres NC02 par section](06-nomenclature-nc02.png)
+![Clic sur une colonne du graphique : détail du mois avec drapeaux](06-detail-d-un-mois.png)
 
-## Chapitre 07 (légumes) : sous-positions NC06
+## Produits : grille des chapitres NC02
 
-![Chapitre 07 (légumes) : sous-positions NC06](07-chapitre-nc02-legumes.png)
+![Produits : grille des chapitres NC02](07-produits-chapitres-nc02.png)
 
-## Sous-position 0704 90 (choux) : codes NC8
+## Chapitre 85 : sous-positions NC06, anciens codes signalés
 
-![Sous-position 0704 90 (choux) : codes NC8](08-sous-position-nc06-choux.png)
+![Chapitre 85 : sous-positions NC06, anciens codes signalés](08-chapitre-85-avec-anciens-codes.png)
 
-## Fiche NC8, période courte : découpage au mois (année désactivée)
+## Ancienne sous-position 8517 12 : données converties vers les codes actuels
 
-![Fiche NC8, période courte : découpage au mois (année désactivée)](09-fiche-nc8-periode-courte-mois.png)
+![Ancienne sous-position 8517 12 : données converties vers les codes actuels](09-ancienne-sous-position-851712.png)
 
-## Fiche NC8, 2020 → 2025 : découpage au trimestre par défaut
+## Fiche NC8 d'un code créé en 2022 : série reconstituée depuis 2015
 
-![Fiche NC8, 2020 → 2025 : découpage au trimestre par défaut](10-fiche-nc8-trimestres.png)
+![Fiche NC8 d'un code créé en 2022 : série reconstituée depuis 2015](10-fiche-nc8-code-cree-en-2022-serie-reconstituee.png)
 
-## Clic sur un trimestre : détail du trimestre
+## Fiche NC8 d'un code supprimé en 2022 : continuation dans ses successeurs
 
-![Clic sur un trimestre : détail du trimestre](11-detail-d-un-trimestre.png)
+![Fiche NC8 d'un code supprimé en 2022 : continuation dans ses successeurs](11-fiche-nc8-code-remplace-en-2022.png)
 
-## Fiche NC8, toute la période : découpage à l'année avec prévision
+## Fiche NC8, période courte : détail mois par mois
 
-![Fiche NC8, toute la période : découpage à l'année avec prévision](12-fiche-nc8-toute-periode-annees.png)
+![Fiche NC8, période courte : détail mois par mois](12-fiche-nc8-periode-courte-par-mois.png)
 
-## Carte des pays couverts
+## Fiche NC8, période longue : détail par trimestre
 
-![Carte des pays couverts](13-carte-du-monde.png)
+![Fiche NC8, période longue : détail par trimestre](13-fiche-nc8-par-trimestre.png)
 
-## Fiche pays depuis la carte
+## Clic sur un trimestre : détail par pays
 
-![Fiche pays depuis la carte](14-carte-fiche-pays.png)
+![Clic sur un trimestre : détail par pays](14-detail-d-un-trimestre.png)
 
-## Comparateur : pays UE exportateurs vs importateurs de choux
+## Fiche NC8 complète (vin AOP) : synthèse, évolution, prix & volumes par pays, pays partenaires, marché mondial — tout sur une page
 
-![Comparateur : pays UE exportateurs vs importateurs de choux](15-comparateur-choux-exportateurs-vs-importateurs.png)
+![Fiche NC8 complète (vin AOP) : synthèse, évolution, prix & volumes par pays, pays partenaires, marché mondial — tout sur une page](15-fiche-nc8-vin-toutes-les-donnees.png)
 
-## Comparateur : France vs Allemagne, exportations de vin
+## Fiche NC8, section Prix & volumes : prix médian, moyen, pays les moins / plus chers, boîtes à moustaches, nuage prix / volume
 
-![Comparateur : France vs Allemagne, exportations de vin](16-comparateur-france-vs-allemagne.png)
+![Fiche NC8, section Prix & volumes : prix médian, moyen, pays les moins / plus chers, boîtes à moustaches, nuage prix / volume](16-fiche-nc8-section-prix-et-volumes.png)
 
-## Explorateur : lignes détaillées, drapeaux, profil mensuel, export CSV
+## Fiche NC8 smartphones : prix à l'import par fournisseur hors UE
 
-![Explorateur : lignes détaillées, drapeaux, profil mensuel, export CSV](17-explorateur.png)
+![Fiche NC8 smartphones : prix à l'import par fournisseur hors UE](17-fiche-nc8-prix-smartphones-fournisseurs.png)
 
-## Rapport généré en un clic, dans l'éditeur
+## Pays partenaires : carte
 
-![Rapport généré en un clic, dans l'éditeur](18-editeur-de-rapport.png)
+![Pays partenaires : carte](18-pays-partenaires-carte.png)
 
-## Mode présentation plein écran
+## Fiche d'un pays
 
-![Mode présentation plein écran](19-mode-presentation.png)
+![Fiche d'un pays](19-fiche-pays.png)
 
-## Liste des rapports
+## Carte des prix moyens
 
-![Liste des rapports](20-liste-des-rapports.png)
+![Carte des prix moyens](20-carte-des-prix-moyens.png)
 
-## Compte et offres
+## Fiche NC6 (vins en récipients ≤ 2 l) : codes NC8, évolution, prix & volumes, pays, marché mondial
 
-![Compte et offres](21-compte-et-offres.png)
+![Fiche NC6 (vins en récipients ≤ 2 l) : codes NC8, évolution, prix & volumes, pays, marché mondial](21-fiche-nc6-vin-avec-prix-et-marche-mondial.png)
 
-## Thème sombre
+## Fiche NC8, section Marché mondial : tous les pays, sources, comparaison miroir
 
-![Thème sombre](22-tableau-de-bord-theme-sombre.png)
+![Fiche NC8, section Marché mondial : tous les pays, sources, comparaison miroir](22-fiche-nc8-section-marche-mondial.png)
 
-## Fiche NC8 en thème sombre
+## Comparer : exportateurs vs importateurs de choux
 
-![Fiche NC8 en thème sombre](23-fiche-nc8-theme-sombre.png)
+![Comparer : exportateurs vs importateurs de choux](23-comparer-choux-exportateurs-vs-importateurs.png)
 
-## Mobile : tableau de bord
+## Comparer : France vs Allemagne dans le temps
 
-![Mobile : tableau de bord](24-mobile-tableau-de-bord.png)
+![Comparer : France vs Allemagne dans le temps](24-comparer-france-vs-allemagne.png)
 
-## Mobile : nomenclature
+## Lignes détaillées : anciens codes convertis
 
-![Mobile : nomenclature](25-mobile-nomenclature.png)
+![Lignes détaillées : anciens codes convertis](25-lignes-detaillees-anciens-codes-convertis.png)
+
+## Rapport généré en un clic depuis une fiche NC8
+
+![Rapport généré en un clic depuis une fiche NC8](26-rapport-genere-en-un-clic.png)
+
+## Mode présentation
+
+![Mode présentation](27-mode-presentation.png)
+
+## Rapports
+
+![Rapports](28-rapports.png)
+
+## Compte & données : état des données, fichiers bulk Eurostat, mises à jour, quarantaine
+
+![Compte & données : état des données, fichiers bulk Eurostat, mises à jour, quarantaine](29-compte-et-etat-des-donnees.png)
+
+## Thème sombre : vue d'ensemble
+
+![Thème sombre : vue d'ensemble](30-theme-sombre-vue-d-ensemble.png)
+
+## Thème sombre : prix sur la fiche NC
+
+![Thème sombre : prix sur la fiche NC](31-theme-sombre-fiche-prix.png)
+
+## Mobile : vue d'ensemble
+
+![Mobile : vue d'ensemble](32-mobile-vue-d-ensemble.png)
+
+## Mobile : prix sur la fiche NC
+
+![Mobile : prix sur la fiche NC](33-mobile-fiche-prix.png)

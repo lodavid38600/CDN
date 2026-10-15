@@ -26,6 +26,7 @@ const { withLock } = await import('../src/services/lock.js');
 const { bumpDataVersion } = await import('../src/services/dataVersion.js');
 const { runUpdate } = await import('../src/services/updateJob.js');
 const { config } = await import('../src/config.js');
+const { BulkFile } = await import('../src/models/BulkFile.js');
 const comtrade = await import('../src/connectors/comtrade.js');
 const census = await import('../src/connectors/usCensus.js');
 const hmrc = await import('../src/connectors/ukHmrc.js');
@@ -332,6 +333,15 @@ it('jeu mondial : agrégation UE en SH6, priorité nationale respectée, miroirs
   assert.equal(await WorldFlow.countDocuments({ mirror: true }), n);
 });
 
+it('comparaison miroir : limitée au produit demandé', async () => {
+  await WorldFlow.create({ reporter: 'FR', partner: 'US', product: '440111', hs6: '440111', chapter: '44', section: 'IX', year: 2023, flow: 'export', valueEur: 777, quantityKg: 7, months: Array(12).fill(0), source: 'demo', priority: 3 });
+  const phones = await request(app).get('/api/stats/mirror?product=851713&reporters=FR&partners=US').set(auth()).expect(200);
+  const wood = await request(app).get('/api/stats/mirror?product=440111&reporters=FR&partners=US').set(auth()).expect(200);
+  assert.equal(phones.body.years.find((y) => y.year === 2023).aExports, 12 * 900);
+  assert.equal(wood.body.years.find((y) => y.year === 2023).aExports, 777);
+  await WorldFlow.deleteOne({ product: '440111' });
+});
+
 test('connecteurs : normalisation des réponses (Comtrade, US Census, HMRC, SSB)', () => {
   const c = comtrade.normalize({ data: [
     { reporterCode: 842, partnerCode: 251, flowCode: 'M', period: 202301, cmdCode: '220421', primaryValue: 1000, netWgt: 100 },
@@ -394,18 +404,22 @@ it('cache : une nouvelle version des données invalide immédiatement les répon
 });
 
 it('mise à jour : une étape en échec n\'empêche pas les autres, le journal le signale', async () => {
-  const prev = config.eurostatBaseUrl;
+  const prev = { ...config.bulk };
+  const prevApi = [config.eurostatBaseUrl, config.autoUpdate.eurostat, config.autoUpdate.months];
+  Object.assign(config.bulk, { fileUrl: 'http://127.0.0.1:9/indisponible/{name}', from: '2099-01', labelsUrl: '' });
   config.eurostatBaseUrl = 'http://127.0.0.1:9/indisponible';
-  const prevReporters = config.autoUpdate.months;
+  config.autoUpdate.eurostat = true; // complément API optionnel, testé aussi
   config.autoUpdate.months = 1;
   try {
-    const run = await runUpdate({ steps: ['eurostat', 'sync'] });
+    const run = await runUpdate({ steps: ['eurostat-bulk', 'eurostat', 'sync'], now: new Date(2099, 1, 15) });
     assert.equal(run.report.sync.ok, true);
+    assert.equal(run.report['eurostat-bulk'].failed, 2, 'fichiers bulk injoignables signalés');
     assert.ok(run.report.eurostat.failedRequests > 0);
     assert.ok(['success', 'partial'].includes(run.status));
     assert.equal(await JobRun.countDocuments({ name: 'mise-a-jour' }), 1);
   } finally {
-    config.eurostatBaseUrl = prev;
-    config.autoUpdate.months = prevReporters;
+    Object.assign(config.bulk, prev);
+    [config.eurostatBaseUrl, config.autoUpdate.eurostat, config.autoUpdate.months] = prevApi;
+    await BulkFile.deleteMany({});
   }
 });
