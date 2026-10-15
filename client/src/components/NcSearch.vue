@@ -14,6 +14,7 @@ const results = ref([]);
 const open = ref(false);
 const active = ref(-1);
 const root = ref(null);
+const input = ref(null);
 let timer;
 
 watch(() => props.modelValue, (v) => { if (v !== text.value.replace(/\D/g, '')) text.value = v; });
@@ -25,7 +26,8 @@ watch(text, (v) => {
   timer = setTimeout(async () => {
     try {
       results.value = (await api('/products', { params: { q, limit: 8 } })).rows;
-      open.value = true;
+      // Les suggestions ne s'ouvrent que pendant la saisie (pas au remplissage depuis l'URL).
+      open.value = document.activeElement === input.value;
       active.value = -1;
     } catch { results.value = []; }
   }, 200);
@@ -55,7 +57,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onDoc));
 
 <template>
   <div ref="root" class="ncs">
-    <input v-model="text" type="search" :placeholder="placeholder" autocomplete="off" role="combobox" :aria-expanded="open" @focus="open = results.length > 0" @keydown="onKey" />
+    <input ref="input" v-model="text" type="search" :placeholder="placeholder" autocomplete="off" role="combobox" :aria-expanded="open" @focus="open = results.length > 0" @keydown="onKey" />
     <button v-if="text" type="button" class="x" aria-label="Effacer" @click="clear">×</button>
     <ul v-if="open && results.length" class="sug" role="listbox">
       <li v-for="(p, i) in results" :key="p.code" role="option" :aria-selected="i === active" :class="{ on: i === active }" @mousedown.prevent="choose(p)">
