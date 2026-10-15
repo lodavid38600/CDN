@@ -9,15 +9,40 @@ entre les **27 pays de l'UE** et les **pays hors UE**, code NC par code NC (nome
 
 ## Fonctionnalités
 
+### Côté client
+
 | Menu | Ce qu'on y fait |
 |---|---|
-| **Vue d'ensemble** | Phrase de synthèse générée à partir des filtres (« La France a exporté 244 kt de vins vers les pays hors UE pour 2,23 Md € (9,17 €/kg), de mars 2018 à janvier 2019 ») ; indicateurs en valeur, **volume** et **prix moyen** ; évolution au mois, au trimestre ou à l'année selon la période, avec **prévision** ; clic sur une période → détail avec drapeaux |
-| **Produits (codes NC)** | Grille des chapitres NC02 → sous-positions NC06 → codes NC8. **Toutes les données d'un code sur une seule fiche**, avec un sommaire collant (Synthèse · Évolution · Prix & volumes · Pays partenaires · Marché mondial) : voir ci-dessous |
-| **Pays partenaires** | Carte et fiche de chaque pays, en valeur, en volume ou en prix moyen |
-| **Comparer** | Jusqu'à 4 jeux de données sur le même graphique (temps ou pays, base 100, valeur / volume / prix) |
-| **Lignes détaillées** | Toutes les déclarations, prix unitaire, conversion des anciens codes visible, export CSV |
-| **Rapports** | Générés en un clic depuis chaque vue, éditables, mode présentation, export **PDF** et **PowerPoint** |
-| **Compte & données** | Fraîcheur des données, journal des mises à jour, codes NC remplacés, quarantaine, sources |
+| **Accueil** | Recherche d'un produit par mots, actualités de l'outil, dernières mises à jour des données, codes NC modifiés, carte des pays couverts / en cours d'intégration / prévus |
+| **Produits** | Recherche par mots (accents et ordre ignorés) ou par code ; navigation chapitres → sous-positions → codes NC8, sans chiffres avant la fiche du code NC8. **Toutes les données d'un code sur une seule fiche** (voir ci-dessous) |
+| **Pays partenaires** | Liste des pays et fiche de chaque pays |
+| **Comparer des produits** | 2 à 4 codes NC8 : valeur, volume, prix moyen et médian, évolution sur un an, principaux pays, évolution superposée (base 100 possible), marchés communs |
+| **Déclarations** | Une ligne = un flux sur un mois, la plus récente d'abord ; flux des dernières déclarations (500 lignes qui apparaissent progressivement) ; recherche, tri, export CSV |
+| **Rapports** | Générés en un clic, éditables, mode présentation, export **PDF** et **PowerPoint** |
+| **Assistance** | Demandes (tickets) avec suivi, messagerie instantanée avec l'équipe |
+| **Ma société** | Abonnement et fonctionnalités incluses, coordonnées, membres (gérés par les responsables) |
+| **Factures** | Factures de la société, imprimables en PDF (responsables) |
+
+### Sociétés, rôles et droits
+
+Chaque utilisateur appartient à une **société** et **hérite de ses droits** : offre souscrite (Essai, Essentiel, Pro,
+Entreprise), fonctionnalités ajoutées ou retirées au cas par cas, nombre de places, plafond d'export, échéance.
+Une société suspendue ou dont l'abonnement est échu garde l'accès à l'accueil, à l'assistance et aux factures,
+mais plus aux données. Tout est vérifié côté serveur ; l'interface n'affiche que ce que l'utilisateur a le droit de voir.
+
+| Rôle | Droits |
+|---|---|
+| Membre (client) | Utilise l'outil selon l'offre de sa société, ouvre des demandes |
+| Responsable (client) | En plus : coordonnées de la société, membres (ajout, rôle, désactivation, mot de passe), factures, toutes les demandes de la société |
+| Commercial (équipe) | Sociétés, comptes clients, abonnements et droits, facturation, tickets, messagerie |
+| Administrateur (équipe) | Tout, y compris le journal d'activité, l'administration du site (données, libellés des produits, actualités, pays annoncés, bandeau) et les comptes de l'équipe |
+
+**Journal d'activité** : connexions (réussies, échouées), refus d'accès, comptes, sociétés, abonnements, factures,
+support, exports, administration, erreurs ; filtrable par catégorie, niveau, utilisateur, société, dates ; export CSV ; conservé un an.
+
+**Libellés des produits** : l'administrateur importe la table officielle de la nomenclature combinée (NC8, publiée
+chaque année par la douane) depuis *Site et données → Libellés des produits* : Excel .xlsx, CSV, TSV ou texte ;
+colonnes reconnues automatiquement, libellé « autosuffisant » préféré s'il existe. La recherche par mots s'en sert.
 
 Les volumes s'affichent dans l'unité adaptée (kg, t, kt, Mt). Une seule bascule « Valeur € / Volume / Prix €/kg »
 pilote les indicateurs, graphiques et classements.
@@ -155,7 +180,8 @@ npm run dev:server      # API sur http://localhost:4000
 npm run dev:client      # interface sur http://localhost:5173
 ```
 
-Compte de démonstration : **demo@douane-saas.eu / demo12345** (offre Pro).
+Comptes de démonstration (mot de passe **demo12345**) : **demo@douane-saas.eu** (responsable d'une société, offre Pro),
+**analyste@demo-sas.example** (membre), **commercial@douane-saas.eu** (commercial), **admin@douane-saas.eu** (administrateur).
 
 ### Avec les vraies données Eurostat (sans démo)
 
@@ -165,9 +191,14 @@ cp server/.env.example server/.env        # NODE_ENV=production, JWT_SECRET, COR
 docker run -d --name douane-mongo -p 27017:27017 -v douane-mongo:/data/db mongo:7
 npm run bulk:sync -- --from 2026-06 --to 2026-06   # 1 mois pour vérifier
 npm run bulk:sync -- --from 2024-09                # puis 2 ans
-npm run user:create -- --email moi@exemple.fr --password "motdepasse" --admin --pro
+npm run user:create -- --email moi@exemple.fr --password "motdepasse" --admin     # compte administrateur
+# puis, dans l'outil : Équipe → Sociétés → Nouvelle société (ou --company "Société" --plan pro)
 npm run build && npm start                          # http://localhost:4000
 ```
+
+Réglages utiles dans `server/.env` : `SIGNUP_ENABLED=false` (comptes créés uniquement par l'équipe commerciale),
+`SELLER_NAME`, `SELLER_ADDRESS`, `SELLER_SIRET`, `SELLER_VAT`, `SELLER_IBAN`, `SELLER_EMAIL` (mentions des factures).
+Au démarrage, les comptes créés avant l'arrivée des sociétés sont rattachés automatiquement à une société.
 
 ### Production
 
@@ -246,9 +277,14 @@ Toutes les routes (sauf `/api/auth/*` et `/api/health`) exigent `Authorization: 
 | GET | `/api/stats/matrix?rows=reporter&cols=partner&size=8` | Matrice croisée |
 | GET | `/api/stats/prices?product=&flow=&dimension=reporter\|partner` | Prix moyen, médian pondéré, quartiles, extrêmes par pays ; évolution |
 | GET | `/api/stats/mirror?product=&reporters=FR&partners=US` | Déclarations croisées exportateur / importateur |
-| GET | `/api/admin/status`, `POST /api/admin/update` | État des données, mise à jour manuelle (administrateurs) |
+| GET/PUT | `/api/auth/me`, `PUT /api/auth/me/password` | Profil, société, droits effectifs ; changement de mot de passe |
+| GET | `/api/home` | Accueil : actualités, mises à jour, codes NC modifiés, couverture |
+| GET/PUT/POST | `/api/company`, `/api/company/members` | Ma société et ses membres (responsables) |
+| GET/POST | `/api/support/tickets`, `/api/support/chat` | Demandes et messagerie |
+| GET | `/api/invoices` | Factures de la société (responsables) |
+| * | `/api/admin/*` | Équipe : sociétés, utilisateurs, abonnements, tickets, messagerie, factures, journal, site et données (chaque route exige sa permission) |
 | GET | `/api/nomenclature`, `/api/nomenclature/:code` | Arborescence ; nœud NC02 / NC06 / NC08 avec parents et enfants |
-| GET | `/api/trade`, `/api/trade/export.csv` | Lignes détaillées ; export CSV (1 000 lignes Gratuit, 100 000 Pro) |
+| GET | `/api/trade/mois`, `/api/trade/mois.csv` | Déclarations au mois, les plus récentes d'abord ; export CSV (plafond selon l'offre) |
 | GET | `/api/products?q=`, `/api/products/:code` | Recherche ; fiche d'un code NC8 |
 | GET/POST/PUT/DELETE | `/api/reports`, `/api/reports/:id`, `POST /api/reports/:id/blocks` | Rapports de l'utilisateur |
 
@@ -260,7 +296,8 @@ Filtres communs : `periodFrom` / `periodTo` (`AAAA-MM`), ou `yearFrom` / `yearTo
 ## Tests
 
 ```bash
-npm test     # 73 tests : fichiers bulk (formats, .7z/.gz, intra-UE, totaux annuels, régimes, révisions,
+npm test     # 90 tests : droits (héritage, isolation entre sociétés, rôles, journal, migration), libellés et
+             # recherche par mots, vue mensuelle, tables de synthèse, fichiers bulk (formats, .7z/.gz, intra-UE, totaux annuels, régimes, révisions,
              # idempotence, téléchargement conditionnel), : nomenclature (scissions, fusions, chaînes, réutilisations, permutations, conservation
              # de la masse, liens déduits), qualité (lignes corrompues), fusion partielle, priorité des sources,
              # devises, miroirs, connecteurs, verrou, mise à jour en échec partiel, API

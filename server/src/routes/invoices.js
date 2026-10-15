@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import { Invoice } from '../models/Invoice.js';
 import { requirePerm } from '../services/access.js';
 import { markOverdue } from '../services/billing.js';
+import { config } from '../config.js';
 
 // Factures de sa société (responsables uniquement).
 const router = Router();
@@ -17,7 +18,7 @@ router.get('/:id', async (req, res) => {
   if (!mongoose.isValidObjectId(req.params.id)) return res.status(404).json({ error: 'Facture introuvable' });
   const inv = await Invoice.findOne({ _id: req.params.id, company: req.company._id }).lean();
   if (!inv) return res.status(404).json({ error: 'Facture introuvable' });
-  res.json(inv);
+  res.json({ ...inv, seller: config.seller });
 });
 
 export default router;

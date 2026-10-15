@@ -14,6 +14,9 @@ const props = defineProps({
   highlight: { type: Array, default: () => [] }, // codes entourés (ex. pays UE)
   height: { type: Number, default: 460 },
   formatter: { type: Function, default: (v) => String(v) },
+  // Mode catégoriel : { FR: 'var(--s1)' } et sa légende [{ label, color }] (remplace l'échelle)
+  categories: { type: Object, default: null },
+  categoryLegend: { type: Array, default: () => [] },
 });
 const emit = defineEmits(['select']);
 
@@ -67,6 +70,7 @@ function step(v) {
   return Math.min(6, Math.floor(t * 7));
 }
 const fillFor = (code, colors = ramp.value, none = nodata.value) => {
+  if (props.categories) return props.categories[code] || none;
   const s = step(props.values[code]);
   return s < 0 ? none : colors[s];
 };
@@ -80,7 +84,7 @@ const shapes = computed(() =>
 // Petits pays (Malte, Luxembourg, Singapour…) : un repère cliquable en plus du tracé.
 const markers = computed(() =>
   features.value
-    .filter((f) => ALPHA2_BY_NUMERIC[f.id] && props.values[ALPHA2_BY_NUMERIC[f.id]] > 0 && geoArea(f) < 0.0004)
+    .filter((f) => ALPHA2_BY_NUMERIC[f.id] && (props.categories ? props.categories[ALPHA2_BY_NUMERIC[f.id]] : props.values[ALPHA2_BY_NUMERIC[f.id]] > 0) && geoArea(f) < 0.0004)
     .map((f) => {
       const [x, y] = projection.value(geoCentroid(f));
       return { code: ALPHA2_BY_NUMERIC[f.id], x, y };
@@ -144,14 +148,17 @@ defineExpose({ toImage });
       />
     </svg>
 
-    <div v-if="hover && (details[hover] || values[hover] !== undefined)" class="tip" :style="{ left: `${tip.x + 14}px`, top: `${tip.y + 14}px` }">
+    <div v-if="hover && (details[hover] || (!categories && values[hover] !== undefined))" class="tip" :style="{ left: `${tip.x + 14}px`, top: `${tip.y + 14}px` }">
       <div class="tip-h"><Flag :code="hover" :size="20" /> <strong>{{ details[hover]?.name || hover }}</strong></div>
       <div v-if="details[hover]?.lines" class="tip-l"><div v-for="l in details[hover].lines" :key="l">{{ l }}</div></div>
       <div v-else class="tip-l">{{ formatter(values[hover] || 0) }}</div>
       <div class="hint">Cliquer pour le détail</div>
     </div>
 
-    <div v-if="legend.length" class="wm-legend" aria-hidden="true">
+    <div v-if="categories" class="wm-legend" aria-hidden="true">
+      <template v-for="c in categoryLegend" :key="c.label"><span class="sw" :style="{ background: c.color }" /><span class="hint">{{ c.label }}</span></template>
+    </div>
+    <div v-else-if="legend.length" class="wm-legend" aria-hidden="true">
       <span class="hint">Faible</span>
       <span v-for="i in 7" :key="i" class="sw" :style="{ background: ramp[i - 1] }" />
       <span class="hint">Fort</span>

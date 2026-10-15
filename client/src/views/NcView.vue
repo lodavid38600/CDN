@@ -1,248 +1,88 @@
 <script setup>
 import { computed, ref, watch } from 'vue';
-import { useRouter } from 'vue-router';
 import { api } from '../api.js';
-import { eur, tonnes, ncCode, sharePct, rangeLabel } from '../format.js';
-import { useMetaStore } from '../stores/meta.js';
-import { useReportsStore } from '../stores/reports.js';
-import { trendSpec, rankSpec, hbarHeight } from '../lib/specs.js';
-import { kpiBlock, narrativeBlock, rankTableBlock, sourceBlock } from '../lib/reportBlocks.js';
-import PeriodPicker from '../components/PeriodPicker.vue';
-import KpiCard from '../components/KpiCard.vue';
-import ChartCard from '../components/ChartCard.vue';
-import RankTable from '../components/RankTable.vue';
-import Sparkline from '../components/Sparkline.vue';
-import PeriodDrawer from '../components/PeriodDrawer.vue';
-import NcHistory from '../components/NcHistory.vue';
-import GranularityPicker from '../components/GranularityPicker.vue';
-import PeriodTable from '../components/PeriodTable.vue';
-import PriceAnalysis from '../components/PriceAnalysis.vue';
-import WorldMarket from '../components/WorldMarket.vue';
-import SectionNav from '../components/SectionNav.vue';
-import { bestGranularity, GRANULARITY_WORD } from '../lib/granularity.js';
+import { ncCode } from '../format.js';
 
-// Niveau intermédiaire de navigation : chapitre NC02 (enfants NC06) ou sous-position NC06 (enfants NC08).
-// Une sous-position NC06 a sa fiche complète : prix et volumes par pays et marché mondial compris.
-const SECTIONS6 = [
-  { id: 'codes', label: 'Codes NC8' },
-  { id: 'evolution', label: 'Évolution' },
-  { id: 'prix', label: 'Prix & volumes' },
-  { id: 'pays', label: 'Pays partenaires' },
-  { id: 'monde', label: 'Marché mondial' },
-];
+// Navigation : un chapitre (liste des sous-positions, regroupées par position) ou une
+// sous-position (liste des codes à 8 chiffres). Les chiffres sont sur la fiche du code NC8.
 const props = defineProps({ code: { type: String, required: true } });
-const router = useRouter();
-const meta = useMetaStore();
-const reports = useReportsStore();
-
 const node = ref(null);
-const summary = ref(null);
-const series = ref([]);
-const fc = ref(null);
-const childStats = ref({});
-const childSparks = ref({});
-const partners = ref([]);
-const reporters = ref([]);
-const period = ref({ from: '', to: '' });
-const flow = ref('');
-const drawer = ref('');
-const granularity = ref('month');
-const loading = ref(false);
 const error = ref('');
-
-const childDim = computed(() => (props.code.length === 2 ? 'hs6' : 'product'));
-const params = computed(() => ({ product: props.code, periodFrom: period.value.from, periodTo: period.value.to }));
-const childLink = (c) => (c.level === 8 ? `/produits/${c.code}` : `/nomenclature/${c.code}`);
-const val = (code) => {
-  const s = childStats.value[code];
-  if (!s) return 0;
-  return flow.value === 'import' ? s.importEur : flow.value === 'export' ? s.exportEur : s.totalEur;
-};
-const childTotal = computed(() => Object.keys(childStats.value).reduce((t, k) => t + val(k), 0) || 1);
-const children = computed(() => [...(node.value?.children || [])].sort((a, b) => val(b.code) - val(a.code)));
-const periodText = computed(() => (summary.value?.period ? rangeLabel(summary.value.period.from, summary.value.period.to) : ''));
-
-async function load() {
-  loading.value = true;
+watch(() => props.code, async () => {
   error.value = '';
-  try {
-    await meta.load();
-    const p = params.value;
-    const [n, s, ts, f, kids, sp, pa, re] = await Promise.all([
-      api(`/nomenclature/${props.code}`),
-      api('/stats/summary', { params: p }),
-      api('/stats/timeseries', { params: { ...p, granularity: granularity.value } }),
-      api('/stats/forecast', { params: { product: props.code, granularity: granularity.value, horizon: { month: 12, quarter: 4, year: 3 }[granularity.value] } }),
-      api('/stats/top', { params: { ...p, dimension: childDim.value, limit: 200 } }),
-      api('/stats/sparklines', { params: { product: props.code, dimension: childDim.value, flow: flow.value } }),
-      api('/stats/top', { params: { ...p, flow: flow.value, dimension: 'partner', limit: 10 } }),
-      api('/stats/top', { params: { ...p, flow: flow.value, dimension: 'reporter', limit: 10 } }),
-    ]);
-    node.value = n;
-    summary.value = s;
-    series.value = ts;
-    fc.value = f;
-    childStats.value = Object.fromEntries(kids.map((r) => [r.key, r]));
-    childSparks.value = sp.series;
-    partners.value = pa;
-    reporters.value = re;
-  } catch (e) {
-    error.value = e.message;
-  } finally {
-    loading.value = false;
+  try { node.value = await api(`/nomenclature/${props.code}`); } catch (e) { error.value = e.message; node.value = null; }
+}, { immediate: true });
+
+// Sous-positions regroupées par position (4 chiffres), dans l'ordre des codes
+const groups = computed(() => {
+  if (!node.value || node.value.level !== 2) return [];
+  const map = new Map();
+  for (const c of node.value.children) {
+    const h = c.code.slice(0, 4);
+    if (!map.has(h)) map.set(h, { code: h, label: node.value.headings?.[h] || '', items: [] });
+    map.get(h).items.push(c);
   }
-}
-function fit() {
-  granularity.value = bestGranularity(period.value.from, period.value.to, meta);
-}
-watch(() => props.code, async () => { await meta.load(); fit(); load(); }, { immediate: true });
-watch(() => [period.value.from, period.value.to], fit);
-watch(granularity, load);
-watch([period, flow], load, { deep: true });
-
-const trend = computed(() =>
-  trendSpec({
-    rows: series.value, fc: fc.value, measure: 'value', flow: flow.value,
-    title: `Évolution ${GRANULARITY_WORD[granularity.value]} — NC ${ncCode(props.code)}`,
-    subtitle: `${node.value?.label || ''} · ${periodText.value}`,
-  })
-);
-const partnerSpec = computed(() => rankSpec({ rows: partners.value, flow: flow.value, title: 'Partenaires hors UE', subtitle: node.value?.label }));
-const reporterSpec = computed(() => rankSpec({ rows: reporters.value, flow: flow.value, title: 'Pays UE déclarants', subtitle: node.value?.label }));
-
-async function generateReport() {
-  const blocks = [
-    { type: 'heading', text: `NC ${ncCode(props.code)} — ${node.value.label}`, level: 1 },
-    narrativeBlock(summary.value, { scope: `les échanges extra-UE du code NC ${ncCode(props.code)}`, topPartner: partners.value[0], topReporter: reporters.value[0] }),
-    kpiBlock(summary.value),
-    { type: 'chart', spec: trend.value },
-    { type: 'chart', spec: partnerSpec.value },
-    { type: 'chart', spec: reporterSpec.value },
-    rankTableBlock(children.value.filter((c) => childStats.value[c.code]).map((c) => ({ ...childStats.value[c.code], label: c.label })), `Détail par ${props.code.length === 2 ? 'sous-position NC06' : 'code NC8'}`),
-    sourceBlock(meta.lastPeriod),
-  ];
-  const r = await reports.generate(`NC ${ncCode(props.code)} — ${node.value.label}`, periodText.value, blocks);
-  router.push(`/rapports/${r._id}`);
-}
+  return [...map.values()].sort((a, b) => a.code.localeCompare(b.code)).map((g) => ({ ...g, items: g.items.sort((a, b) => a.code.localeCompare(b.code)) }));
+});
+const codes = computed(() => (node.value?.level === 6 ? [...node.value.children].sort((a, b) => Number(a.obsolete) - Number(b.obsolete) || a.code.localeCompare(b.code)) : []));
 </script>
 
 <template>
   <div>
     <nav class="crumbs" aria-label="Fil d'Ariane">
-      <RouterLink to="/nomenclature">Nomenclature</RouterLink>
+      <RouterLink to="/nomenclature">Produits</RouterLink>
       <template v-if="node">
-        <span class="sep">›</span><span>Section {{ node.section }}</span>
-        <template v-for="p in node.parents" :key="p.code"><span class="sep">›</span><RouterLink :to="`/nomenclature/${p.code}`">{{ ncCode(p.code) }}</RouterLink></template>
+        <template v-for="p in node.parents" :key="p.code"><span class="sep">›</span><RouterLink :to="`/nomenclature/${p.code}`">{{ ncCode(p.code) }} {{ p.label }}</RouterLink></template>
         <span class="sep">›</span><strong>{{ ncCode(node.code) }}</strong>
       </template>
     </nav>
     <p v-if="error" class="error">{{ error }}</p>
-
     <template v-if="node">
       <div class="page-head">
         <div>
-          <span class="badge badge-accent">{{ node.level === 2 ? 'Chapitre NC02' : 'Sous-position NC06' }}</span>
+          <span class="badge badge-accent">{{ node.level === 2 ? 'Chapitre' : 'Sous-position' }}</span>
           <h1 class="title"><span class="nc code">{{ ncCode(node.code) }}</span> {{ node.label }}</h1>
-          <p>Section {{ node.section }} · {{ node.sectionLabel }}</p>
-        </div>
-        <div class="page-actions">
-          <RouterLink class="btn" :to="{ path: '/comparateur', query: { preset: 'flows', product: code } }">Comparer</RouterLink>
-          <RouterLink class="btn" :to="{ path: '/carte', query: { product: code } }">Carte</RouterLink>
-          <button class="btn btn-primary" :disabled="!summary" @click="generateReport">📄 Générer un rapport</button>
+          <p>{{ node.level === 2 ? 'Choisissez une sous-position, puis le code à 8 chiffres qui vous intéresse.' : 'Choisissez le code à 8 chiffres : sa fiche réunit valeurs, volumes, prix et pays.' }}</p>
         </div>
       </div>
 
-      <NcHistory v-if="node.history" :history="node.history" :code="code" :raw="false" />
-
-      <SectionNav v-if="code.length === 6" :sections="SECTIONS6" />
-
-      <div class="card toolbar">
-        <div class="field"><span>Période</span><PeriodPicker v-model:from="period.from" v-model:to="period.to" /></div>
-        <div class="field"><span>Flux</span>
-          <div class="seg">
-            <button :class="{ on: !flow }" @click="flow = ''">Les deux</button>
-            <button :class="{ on: flow === 'import' }" @click="flow = 'import'">Import</button>
-            <button :class="{ on: flow === 'export' }" @click="flow = 'export'">Export</button>
+      <template v-if="node.level === 2">
+        <section v-for="g in groups" :key="g.code" class="group">
+          <h2><span class="nc">{{ ncCode(g.code) }}</span> {{ g.label }}</h2>
+          <div class="list">
+            <RouterLink v-for="c in g.items" :key="c.code" :to="`/nomenclature/${c.code}`" class="item" :class="{ old: c.obsolete }">
+              <span class="nc code">{{ ncCode(c.code) }}</span>
+              <span class="label">{{ c.label }}</span>
+              <span class="hint">{{ c.obsolete ? 'ancien code' : `${c.productCount} code${c.productCount > 1 ? 's' : ''}` }} ›</span>
+            </RouterLink>
           </div>
-        </div>
-      </div>
+        </section>
+      </template>
 
-      <div v-if="summary" class="kpis" :class="{ loading }" style="margin-bottom: 16px">
-        <KpiCard dot="import" label="Importations" :value="eur(summary.importEur)" :change="summary.changeImport" change-label="sur un an" :spark="series.slice(-24).map((r) => r.importEur)" spark-color="var(--import)" />
-        <KpiCard dot="export" label="Exportations" :value="eur(summary.exportEur)" :change="summary.changeExport" change-label="sur un an" :spark="series.slice(-24).map((r) => r.exportEur)" spark-color="var(--export)" />
-        <KpiCard label="Solde" :value="`${summary.balanceEur >= 0 ? '+' : ''}${eur(summary.balanceEur)}`" :sub="summary.balanceEur >= 0 ? 'Excédent' : 'Déficit'" />
-        <KpiCard label="Volumes" :value="tonnes(summary.importKg + summary.exportKg)" :sub="`${tonnes(summary.exportKg)} exportées`" />
-        <KpiCard :label="code.length === 2 ? 'Sous-positions NC06' : 'Codes NC8'" :value="String(children.length)" :sub="`${summary.partnerCount} partenaires hors UE`" />
-      </div>
-
-      <section id="codes" class="card anchor" style="margin-bottom: 16px">
-        <div class="card-head">
-          <div>
-            <h2>{{ code.length === 2 ? 'Sous-positions NC06' : 'Codes NC8' }} de {{ ncCode(code) }}</h2>
-            <p>Classés par {{ flow === 'import' ? 'importations' : flow === 'export' ? 'exportations' : 'échanges totaux' }} · {{ periodText }} · cliquer pour descendre d'un niveau</p>
-          </div>
-        </div>
-        <div class="tiles">
-          <RouterLink v-for="c in children" :key="c.code" :to="childLink(c)" class="tile" :class="{ old: c.obsolete }" :title="c.obsolete ? `Ancien code${c.validTo ? ` (jusqu'en ${c.validTo})` : ''} : ses données sont converties vers les codes actuels` : c.label">
-            <div class="t-top">
-              <span class="t-code nc">{{ ncCode(c.code) }} <span v-if="c.obsolete" class="badge">ancien code</span></span>
-              <Sparkline v-if="childSparks[c.code]" :values="childSparks[c.code]" :width="64" :height="22" />
-            </div>
-            <div class="t-label">{{ c.label }}</div>
-            <div class="t-foot">
-              <strong>{{ val(c.code) ? eur(val(c.code)) : '—' }}</strong>
-              <span class="muted">{{ val(c.code) ? sharePct(val(c.code) / childTotal) : '' }}</span>
-            </div>
-            <div class="share-bar"><span :style="{ width: `${(val(c.code) / childTotal) * 100}%` }" /></div>
+      <section v-else class="card">
+        <div class="list">
+          <RouterLink v-for="c in codes" :key="c.code" :to="`/produits/${c.code}`" class="item" :class="{ old: c.obsolete }" :title="c.obsolete ? 'Ancien code : ses données sont rattachées aux codes actuels' : ''">
+            <span class="nc code">{{ ncCode(c.code) }}</span>
+            <span class="label">{{ c.label }}</span>
+            <span class="hint">{{ c.obsolete ? `ancien code${c.validTo ? ` (jusqu'en ${c.validTo})` : ''}` : 'Voir la fiche' }} ›</span>
           </RouterLink>
         </div>
       </section>
-
-      <div id="evolution" class="anchor" />
-      <ChartCard :spec="trend" :height="300" pickable :loading="loading" @pick="(i) => (drawer = series[i]?.period || '')">
-        <template #controls><GranularityPicker v-model="granularity" :from="period.from" :to="period.to" /></template>
-        <p class="hint" style="margin-top: 8px">💡 Cliquez sur une période pour le détail par pays.</p>
-      </ChartCard>
-
-      <div style="margin-top: 16px">
-        <PeriodTable v-model:granularity="granularity" :params="{ product: code }" :from="period.from" :to="period.to" :title="`NC ${ncCode(code)} — détail de la période`" @pick="(p) => (drawer = p)" />
-      </div>
-
-      <template v-if="code.length === 6">
-        <h2 id="prix" class="sec-title">Prix & volumes par pays</h2>
-        <PriceAnalysis :product="code" :label="`${ncCode(code)} — ${node.label}`" :from="period.from" :to="period.to" :flow="flow" />
-      </template>
-
-      <h2 id="pays" class="sec-title">Pays partenaires et déclarants</h2>
-      <div class="grid grid-2">
-        <ChartCard :spec="partnerSpec" :height="hbarHeight(partners.length, flow ? 1 : 2)" :loading="loading" />
-        <ChartCard :spec="reporterSpec" :height="hbarHeight(reporters.length, flow ? 1 : 2)" :loading="loading" />
-        <section class="card"><div class="card-head"><h2>Partenaires hors UE</h2></div><RankTable :rows="partners" :flow="flow" key-label="Pays" /></section>
-        <section class="card"><div class="card-head"><h2>Pays UE déclarants</h2></div><RankTable :rows="reporters" :flow="flow" key-label="Pays" /></section>
-      </div>
-
-      <template v-if="code.length === 6">
-        <h2 id="monde" class="sec-title">Marché mondial · SH {{ ncCode(code) }}</h2>
-        <WorldMarket :code="code" :from="period.from" :to="period.to" :flow="flow" />
-      </template>
     </template>
-    <PeriodDrawer :period="drawer" :params="{ product: code }" :context="`NC ${ncCode(code)}`" @close="drawer = ''" />
   </div>
 </template>
 
 <style scoped>
 .title { margin-top: 6px; }
-.sec-title { margin: 32px 0 12px; font-size: 1.25rem; scroll-margin-top: 120px; }
-.anchor { scroll-margin-top: 120px; }
-.code { color: var(--accent); margin-right: 6px; }
-.toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-bottom: 16px; }
-.toolbar .field { min-width: 220px; }
-.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
-.tile { display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: 12px; color: var(--text); background: var(--surface); border: 1px solid var(--border); transition: transform 0.12s, border-color 0.12s; }
-.tile.old { opacity: 0.6; border-style: dashed; }
-.tile:hover { text-decoration: none; border-color: var(--accent); transform: translateY(-2px); }
-.t-top { display: flex; justify-content: space-between; align-items: center; }
-.t-code { font-size: 1.15rem; font-weight: 700; color: var(--accent); }
-.t-label { font-size: 0.85rem; color: var(--text-2); line-height: 1.3; flex: 1; }
-.t-foot { display: flex; justify-content: space-between; font-size: 0.86rem; font-variant-numeric: tabular-nums; }
+.title .code { color: var(--accent); margin-right: 6px; }
+.group { margin-bottom: 18px; }
+.group h2 { font-size: 0.92rem; margin-bottom: 8px; color: var(--text-2); }
+.group h2 .nc { color: var(--text); margin-right: 6px; }
+.list { display: grid; gap: 6px; }
+.item { display: grid; grid-template-columns: 110px 1fr auto; gap: 12px; align-items: center; padding: 10px 14px; border-radius: 10px; background: var(--surface); border: 1px solid var(--border); color: var(--text); }
+.item:hover { text-decoration: none; border-color: var(--accent); }
+.item.old { opacity: 0.6; border-style: dashed; }
+.item .code { font-weight: 700; color: var(--accent); }
+.label { line-height: 1.35; }
+@media (max-width: 600px) { .item { grid-template-columns: 1fr; gap: 2px; } }
 </style>

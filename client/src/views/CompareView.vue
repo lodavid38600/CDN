@@ -2,303 +2,241 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { api } from '../api.js';
-import { eur, tonnes, perKg, ncCode, rangeLabel, percent } from '../format.js';
+import { eur, tonnes, perKg, ncCode, rangeLabel, percent, sharePct } from '../format.js';
 import { useMetaStore } from '../stores/meta.js';
+import { useAuthStore } from '../stores/auth.js';
 import { useReportsStore } from '../stores/reports.js';
 import { axisLabel, hbarHeight } from '../lib/specs.js';
+import { bestGranularity } from '../lib/granularity.js';
 import PeriodPicker from '../components/PeriodPicker.vue';
 import MultiSelect from '../components/MultiSelect.vue';
 import NcSearch from '../components/NcSearch.vue';
 import ChartCard from '../components/ChartCard.vue';
+import Flag from '../components/Flag.vue';
 
-// Comparateur : 2 à 4 jeux de données (produit × flux × pays) sur un même graphique,
-// dans le temps ou par pays. Un seul axe : la base 100 permet de comparer des ordres de grandeur différents.
+// Comparateur de produits : 2 à 4 codes NC8, dans le même sens d'échange et sur la même période.
+// Pour chacun : valeur, volume, prix moyen et médian, évolution sur un an, principaux pays ;
+// puis évolution superposée et marchés communs.
 const route = useRoute();
 const router = useRouter();
 const meta = useMetaStore();
+const auth = useAuthStore();
 const reports = useReportsStore();
 
-let uid = 0;
-const newSeries = (o = {}) => ({ id: ++uid, product: '', flow: 'export', reporters: [], partners: [], ...o });
-const series = ref([]);
-const mode = ref('time');
-const dimension = ref('reporter');
-const granularity = ref('year');
+const codes = ref(String(route.query.codes || '').split(',').filter((c) => /^\d{8}$/.test(c)).slice(0, 4));
+const flow = ref(route.query.flow === 'import' ? 'import' : 'export');
+const reporters = ref(route.query.reporters ? String(route.query.reporters).split(',') : []);
+const period = ref({ from: String(route.query.periodFrom || ''), to: String(route.query.periodTo || '') });
 const measure = ref('value');
 const base100 = ref(false);
-const chartKind = ref('line');
-const period = ref({ from: '', to: '' });
-const results = ref([]);
-const labels = ref({});
+const picker = ref('');
+const data = ref({});
 const loading = ref(false);
 const error = ref('');
 
-const PRESETS = [
-  { id: 'flows', label: 'Exportateurs vs importateurs', desc: "Un produit : qui exporte, qui importe ? (ex. les choux)" },
-  { id: 'countries', label: 'Deux pays UE', desc: 'France vs Allemagne sur un même produit' },
-  { id: 'products', label: 'Deux produits', desc: 'Vins vs bières, à l\'export' },
-  { id: 'partners', label: 'Deux partenaires', desc: 'États-Unis vs Chine' },
-];
-function applyPreset(id, product = '') {
-  if (id === 'flows') {
-    const p = product || '070490';
-    series.value = [newSeries({ product: p, flow: 'export' }), newSeries({ product: p, flow: 'import' })];
-    mode.value = 'country';
-    dimension.value = 'reporter';
-  } else if (id === 'countries') {
-    const p = product || '2204';
-    series.value = [newSeries({ product: p, reporters: ['FR'] }), newSeries({ product: p, reporters: ['DE'] })];
-    mode.value = 'time';
-  } else if (id === 'products') {
-    series.value = [newSeries({ product: product || '2204' }), newSeries({ product: '2203' })];
-    mode.value = 'time';
-  } else if (id === 'partners') {
-    series.value = [newSeries({ product, partners: ['US'] }), newSeries({ product, partners: ['CN'] })];
-    mode.value = 'time';
-  }
-}
-
-const flowName = (f) => ({ export: 'Exportations', import: 'Importations', both: 'Échanges' })[f];
-async function productLabel(code) {
-  if (!code || labels.value[code] !== undefined) return;
-  labels.value[code] = '';
-  try {
-    if (code.length === 8) labels.value[code] = (await api(`/products/${code}`)).description;
-    else if (code.length === 2 || code.length === 6) labels.value[code] = (await api(`/nomenclature/${code}`)).label;
-  } catch { /* libellé facultatif */ }
-}
-const shortLabel = (code) => {
-  const l = labels.value[code];
-  if (!code) return 'Tous produits';
-  const t = l ? (l.length > 28 ? `${l.slice(0, 27)}…` : l) : `NC ${ncCode(code)}`;
-  return `${t} (${ncCode(code)})`;
+const FLOW = {
+  export: { title: 'Exportations de l\'UE', partners: 'Principaux pays de destination', eu: 'Principaux pays exportateurs de l\'UE' },
+  import: { title: 'Importations de l\'UE', partners: 'Principaux pays d\'origine', eu: 'Principaux pays importateurs de l\'UE' },
 };
-const seriesName = (s) => {
-  const parts = [flowName(s.flow), shortLabel(s.product)];
-  if (s.reporters.length) parts.push(s.reporters.map(meta.countryName).join(', '));
-  if (s.partners.length) parts.push(`${s.flow === 'import' ? 'depuis' : 'vers'} ${s.partners.map(meta.countryName).join(', ')}`);
-  return parts.join(' · ');
-};
+const COLORS = [1, 2, 3, 7];
 
-const mk = computed(() => (measure.value === 'quantity' ? 'Kg' : 'Eur'));
-function pick(row, flow) {
-  const get = (m) => (flow === 'both' ? row[`import${m}`] + row[`export${m}`] : row[`${flow}${m}`]);
-  if (measure.value === 'price') {
-    const q = get('Kg');
-    return q > 0 ? get('Eur') / q : null;
-  }
-  return get(mk.value);
+function add(p) {
+  if (!p?.code || codes.value.includes(p.code) || codes.value.length >= 4) return;
+  codes.value = [...codes.value, p.code];
+  picker.value = '';
 }
+const remove = (c) => { codes.value = codes.value.filter((x) => x !== c); };
 
-async function run() {
+const granularity = computed(() => bestGranularity(period.value.from, period.value.to, meta));
+async function loadOne(code) {
+  const p = { product: code, reporters: reporters.value, periodFrom: period.value.from, periodTo: period.value.to };
+  const [info, summary, series, partners, eu, prices] = await Promise.all([
+    api(`/products/${code}`),
+    api('/stats/summary', { params: p }),
+    api('/stats/timeseries', { params: { ...p, granularity: granularity.value } }),
+    api('/stats/top', { params: { ...p, flow: flow.value, dimension: 'partner', limit: 10 } }),
+    reporters.value.length ? Promise.resolve([]) : api('/stats/top', { params: { ...p, flow: flow.value, dimension: 'reporter', limit: 5 } }),
+    auth.has('prices') ? api('/stats/prices', { params: { ...p, flow: flow.value, dimension: flow.value === 'import' ? 'partner' : 'reporter' } }).catch(() => null) : null,
+  ]);
+  return { code, info, summary, series, partners, eu, prices };
+}
+async function load() {
+  router.replace({ query: { codes: codes.value.join(',') || undefined, flow: flow.value, reporters: reporters.value.join(',') || undefined, periodFrom: period.value.from || undefined, periodTo: period.value.to || undefined } });
+  if (!codes.value.length) { data.value = {}; return; }
   loading.value = true;
   error.value = '';
   try {
-    await Promise.all(series.value.map((s) => productLabel(s.product)));
-    results.value = await Promise.all(
-      series.value.map(async (s) => {
-        const p = { product: s.product, reporters: s.reporters, partners: s.partners, periodFrom: period.value.from, periodTo: period.value.to };
-        const [summary, data] = await Promise.all([
-          api('/stats/summary', { params: p }),
-          mode.value === 'time'
-            ? api('/stats/timeseries', { params: { ...p, granularity: granularity.value } })
-            : api('/stats/top', { params: { ...p, dimension: dimension.value, flow: s.flow === 'both' ? '' : s.flow, limit: 30, sort: measure.value === 'quantity' ? 'quantity' : 'value' } }),
-        ]);
-        return { s, summary, data };
-      })
-    );
-    router.replace({ query: { s: JSON.stringify({ series: series.value.map(({ id, ...x }) => x), mode: mode.value, dimension: dimension.value, granularity: granularity.value, measure: measure.value, base100: base100.value, period: period.value }) } });
-  } catch (e) {
-    error.value = e.message;
-  } finally {
-    loading.value = false;
-  }
+    await meta.load();
+    const all = await Promise.all(codes.value.map(loadOne));
+    data.value = Object.fromEntries(all.map((d) => [d.code, d]));
+  } catch (e) { error.value = e.message; } finally { loading.value = false; }
 }
+watch([codes, flow, reporters], load, { deep: true });
+watch(period, load, { deep: true });
+onMounted(load);
 
-const unit = computed(() => (base100.value && mode.value === 'time' ? 'index' : measure.value === 'quantity' ? 'kg' : measure.value === 'price' ? 'eurkg' : 'eur'));
-const spec = computed(() => {
-  const title = mode.value === 'time' ? 'Comparaison dans le temps' : `Comparaison par ${dimension.value === 'reporter' ? 'pays UE déclarant' : 'partenaire hors UE'}`;
-  const subtitle = `${measure.value === 'quantity' ? 'Quantités (t)' : measure.value === 'price' ? 'Prix moyen (€/kg)' : 'Valeurs (€)'}${base100.value && mode.value === 'time' ? ', base 100 au début de la période' : ''} · ${rangeLabel(period.value.from, period.value.to)}`;
-  if (!results.value.length) return { kind: 'line', title, subtitle, labels: [], series: [], unit: unit.value };
+const items = computed(() => codes.value.map((c, i) => ({ ...data.value[c], color: COLORS[i] })).filter((d) => d.info));
+const k = computed(() => (flow.value === 'import' ? 'import' : 'export'));
+const val = (d) => d.summary[`${k.value}Eur`];
+const kg = (d) => d.summary[`${k.value}Kg`];
+const change = (d) => d.summary[`change${k.value === 'import' ? 'Import' : 'Export'}`];
+const periodText = computed(() => {
+  const p = items.value[0]?.summary?.period;
+  return p ? rangeLabel(p.from, p.to) : '';
+});
+const short = (d) => (d.info.description.length > 40 ? `${d.info.description.slice(0, 39)}…` : d.info.description);
 
-  if (mode.value === 'time') {
-    const rows0 = results.value[0].data;
-    const out = results.value.map((r, i) => {
-      let values = r.data.map((row) => pick(row, r.s.flow));
-      if (base100.value) {
-        const first = values.find((v) => v > 0);
-        values = values.map((v) => (first && v !== null ? (v / first) * 100 : null));
-      }
-      return { name: seriesName(r.s), color: i + 1, values };
-    });
-    return { kind: chartKind.value === 'line' ? 'line' : 'bar', title, subtitle, labels: rows0.map(axisLabel), series: out, unit: unit.value };
-  }
-
-  // Par pays : union des pays, triés par valeur maximale toutes séries confondues.
-  const byKey = new Map();
-  results.value.forEach((r, i) => {
-    for (const row of r.data) {
-      const e = byKey.get(row.key) || { key: row.key, label: row.label, vals: Array(results.value.length).fill(0) };
-      e.vals[i] = pick(row, r.s.flow) || 0;
-      byKey.set(row.key, e);
+// Évolution superposée (un seul axe ; base 100 pour comparer des ordres de grandeur différents)
+const trend = computed(() => {
+  if (!items.value.length) return null;
+  const key = { value: 'Eur', quantity: 'Kg', price: 'Price' }[measure.value];
+  const rows = items.value[0].series;
+  const series = items.value.map((d) => {
+    let values = d.series.map((r) => r[`${k.value}${key}`] ?? null);
+    if (base100.value) {
+      const first = values.find((v) => v > 0);
+      values = values.map((v) => (first && v !== null ? (v / first) * 100 : null));
     }
+    return { name: `${ncCode(d.code)} ${short(d)}`, color: d.color, values };
   });
-  const keys = [...byKey.values()].sort((a, b) => Math.max(...b.vals) - Math.max(...a.vals)).slice(0, 15);
   return {
-    kind: 'hbar', title, subtitle, unit: unit.value,
-    labels: keys.map((k) => k.label), keys: keys.map((k) => k.key),
-    series: results.value.map((r, i) => ({ name: seriesName(r.s), color: i + 1, values: keys.map((k) => k.vals[i]) })),
+    kind: 'line', unit: base100.value ? 'index' : { value: 'eur', quantity: 'kg', price: 'eurkg' }[measure.value],
+    title: `${FLOW[flow.value].title} — ${{ value: 'valeur', quantity: 'volume', price: 'prix moyen au kilo' }[measure.value]}${base100.value ? ' (base 100 au début de la période)' : ''}`,
+    subtitle: `${periodText.value}${reporters.value.length ? ` · ${reporters.value.map(meta.countryName).join(', ')}` : ' · ensemble de l\'UE'}`,
+    labels: rows.map(axisLabel), series,
   };
 });
-const chartHeight = computed(() => (mode.value === 'time' ? 360 : hbarHeight(spec.value.labels.length, results.value.length) + results.value.length * 6));
 
-const fmtTotal = (r) => {
-  const s = r.summary;
-  const v = (m) => (r.s.flow === 'both' ? s[`import${m}`] + s[`export${m}`] : s[`${r.s.flow}${m}`]);
-  return { value: eur(v('Eur')), qty: tonnes(v('Kg')), price: perKg(v('Eur') / v('Kg')), change: r.s.flow === 'import' ? s.changeImport : r.s.flow === 'export' ? s.changeExport : null };
-};
+// Marchés communs : pays partenaires des produits comparés, valeur par produit
+const markets = computed(() => {
+  const keys = new Map();
+  for (const d of items.value) for (const p of d.partners) if (!keys.has(p.key)) keys.set(p.key, p.label);
+  return [...keys.entries()].map(([key, label]) => ({
+    key, label,
+    values: items.value.map((d) => d.partners.find((p) => p.key === key)?.[`${k.value}Eur`] || 0),
+  })).sort((a, b) => b.values.reduce((s, v) => s + v, 0) - a.values.reduce((s, v) => s + v, 0)).slice(0, 15);
+});
+const marketSpec = computed(() => (markets.value.length ? {
+  kind: 'hbar', unit: 'eur', title: FLOW[flow.value].partners, subtitle: `Valeur par produit · ${periodText.value}`,
+  labels: markets.value.map((m) => m.label), keys: markets.value.map((m) => m.key),
+  series: items.value.map((d, i) => ({ name: `${ncCode(d.code)} ${short(d)}`, color: d.color, values: markets.value.map((m) => m.values[i]) })),
+} : null));
 
-function add() {
-  if (series.value.length < 4) series.value.push(newSeries({ product: series.value.at(-1)?.product || '' }));
-}
-function remove(i) {
-  series.value.splice(i, 1);
-}
 function addToReport() {
   reports.add([
-    { type: 'chart', spec: JSON.parse(JSON.stringify(spec.value)) },
+    { type: 'heading', text: `Comparaison — ${FLOW[flow.value].title}`, level: 1 },
     {
-      type: 'table', title: 'Totaux sur la période',
-      columns: ['Jeu de données', 'Valeur', 'Quantité', 'Prix moyen'],
-      rows: results.value.map((r) => { const t = fmtTotal(r); return [seriesName(r.s), t.value, t.qty, t.price]; }),
+      type: 'table', title: `Produits comparés · ${periodText.value}`,
+      columns: ['Code NC', 'Produit', 'Valeur', 'Volume', 'Prix moyen', 'Prix médian', 'Sur un an'],
+      rows: items.value.map((d) => [ncCode(d.code), d.info.description, eur(val(d)), tonnes(kg(d)), perKg(kg(d) ? val(d) / kg(d) : null), perKg(d.prices?.overall?.median), percent(change(d))]),
     },
+    ...(trend.value ? [{ type: 'chart', spec: JSON.parse(JSON.stringify(trend.value)) }] : []),
+    ...(marketSpec.value ? [{ type: 'chart', spec: JSON.parse(JSON.stringify(marketSpec.value)) }] : []),
   ], 'Comparaison');
 }
-
-let timer;
-watch([series, mode, dimension, granularity, period, measure], () => { clearTimeout(timer); timer = setTimeout(run, 300); }, { deep: true });
-onMounted(async () => {
-  await meta.load();
-  if (route.query.s) {
-    try {
-      const st = JSON.parse(String(route.query.s));
-      series.value = (st.series || []).slice(0, 4).map((x) => newSeries(x));
-      Object.assign(period.value, st.period || {});
-      mode.value = st.mode || 'time'; dimension.value = st.dimension || 'reporter'; granularity.value = st.granularity || 'year';
-      measure.value = st.measure || 'value'; base100.value = Boolean(st.base100);
-    } catch { applyPreset('flows'); }
-  } else applyPreset(String(route.query.preset || 'flows'), String(route.query.product || ''));
-});
-const countryOpts = (list) => list.map((c) => ({ value: c.code, label: c.name }));
+const countryOpts = computed(() => meta.reporters.map((c) => ({ value: c.code, label: c.name })));
 </script>
 
 <template>
   <div>
     <div class="page-head">
       <div>
-        <h1>Comparateur</h1>
-        <p>Superposez jusqu'à 4 jeux de données sur le même graphique : produits, flux, pays déclarants, partenaires.</p>
+        <h1>Comparer des produits</h1>
+        <p>Choisissez jusqu'à 4 codes NC à 8 chiffres : mêmes indicateurs, même période, même sens d'échange.</p>
       </div>
-      <div class="page-actions"><button class="btn btn-primary" :disabled="!results.length" @click="addToReport">＋ Ajouter au rapport</button></div>
+      <button class="btn btn-primary" :disabled="!items.length" @click="addToReport">＋ Ajouter au rapport</button>
     </div>
 
-    <div class="presets">
-      <button v-for="p in PRESETS" :key="p.id" class="preset card" @click="applyPreset(p.id)">
-        <strong>{{ p.label }}</strong><span class="hint">{{ p.desc }}</span>
-      </button>
-    </div>
-
-    <div class="series">
-      <div v-for="(s, i) in series" :key="s.id" class="card serie" :style="{ '--c': `var(--s${i + 1})` }">
-        <div class="serie-h">
-          <span class="swatch" /> <strong>Jeu {{ String.fromCharCode(65 + i) }}</strong>
-          <span class="hint name">{{ seriesName(s) }}</span>
-          <button v-if="series.length > 1" class="btn btn-sm btn-ghost" aria-label="Retirer" @click="remove(i)">✕</button>
-        </div>
-        <div class="serie-f">
-          <div class="field"><span>Produit</span><NcSearch v-model="s.product" placeholder="Tous produits" /></div>
-          <div class="field"><span>Flux</span>
-            <div class="seg">
-              <button :class="{ on: s.flow === 'export' }" @click="s.flow = 'export'">Export</button>
-              <button :class="{ on: s.flow === 'import' }" @click="s.flow = 'import'">Import</button>
-              <button :class="{ on: s.flow === 'both' }" @click="s.flow = 'both'">Les deux</button>
-            </div>
+    <div class="card setup">
+      <div class="chosen">
+        <span v-for="(c, i) in codes" :key="c" class="chip" :style="{ borderColor: `var(--s${COLORS[i]})` }">
+          <span class="sw" :style="{ background: `var(--s${COLORS[i]})` }" />
+          <span class="nc">{{ ncCode(c) }}</span> <span class="lbl">{{ data[c] ? short(data[c]) : '' }}</span>
+          <button class="x" :aria-label="`Retirer ${c}`" @click="remove(c)">×</button>
+        </span>
+        <div v-if="codes.length < 4" class="add"><NcSearch v-model="picker" placeholder="Ajouter un produit : mot ou code NC8" @select="add" /></div>
+      </div>
+      <div class="opts">
+        <div class="field"><span>Sens des échanges</span>
+          <div class="seg">
+            <button :class="{ on: flow === 'export' }" @click="flow = 'export'">Exportations de l'UE</button>
+            <button :class="{ on: flow === 'import' }" @click="flow = 'import'">Importations de l'UE</button>
           </div>
-          <div class="field"><span>Pays UE</span><MultiSelect v-model="s.reporters" :options="countryOpts(meta.reporters)" placeholder="Toute l'UE" flags /></div>
-          <div class="field"><span>Partenaires</span><MultiSelect v-model="s.partners" :options="countryOpts(meta.partners)" placeholder="Tous" flags /></div>
         </div>
+        <div class="field"><span>Période</span><PeriodPicker v-model:from="period.from" v-model:to="period.to" /></div>
+        <div class="field"><span>Pays de l'UE</span><MultiSelect v-model="reporters" :options="countryOpts" placeholder="Toute l'UE" flags /></div>
       </div>
-      <button v-if="series.length < 4" class="card add" @click="add">＋ Ajouter un jeu de données</button>
-    </div>
-
-    <div class="card toolbar">
-      <div class="field"><span>Comparer</span>
-        <div class="seg">
-          <button :class="{ on: mode === 'time' }" @click="mode = 'time'">Dans le temps</button>
-          <button :class="{ on: mode === 'country' }" @click="mode = 'country'">Par pays</button>
-        </div>
-      </div>
-      <div v-if="mode === 'country'" class="field"><span>Pays</span>
-        <div class="seg">
-          <button :class="{ on: dimension === 'reporter' }" @click="dimension = 'reporter'">UE déclarants</button>
-          <button :class="{ on: dimension === 'partner' }" @click="dimension = 'partner'">Partenaires hors UE</button>
-        </div>
-      </div>
-      <div v-if="mode === 'time'" class="field"><span>Pas de temps</span>
-        <div class="seg">
-          <button :class="{ on: granularity === 'month' }" @click="granularity = 'month'">Mois</button>
-          <button :class="{ on: granularity === 'year' }" @click="granularity = 'year'">Année</button>
-        </div>
-      </div>
-      <div class="field"><span>Mesure</span>
-        <div class="seg">
-          <button :class="{ on: measure === 'value' }" @click="measure = 'value'">Valeur €</button>
-          <button :class="{ on: measure === 'quantity' }" @click="measure = 'quantity'">Quantité</button>
-          <button :class="{ on: measure === 'price' }" @click="measure = 'price'">Prix €/kg</button>
-        </div>
-      </div>
-      <div class="field"><span>Période</span><PeriodPicker v-model:from="period.from" v-model:to="period.to" /></div>
-      <label v-if="mode === 'time'" class="chk" title="Chaque série vaut 100 au début de la période : compare les évolutions, quels que soient les ordres de grandeur"><input v-model="base100" type="checkbox" /> Base 100</label>
     </div>
     <p v-if="error" class="error">{{ error }}</p>
+    <p v-if="!codes.length" class="empty card">Ajoutez au moins deux produits pour les comparer. Par exemple « vins mousseux » et « vins tranquilles », ou deux variétés de fromage.</p>
 
-    <ChartCard :spec="spec" :height="chartHeight" :loading="loading">
-      <template v-if="mode === 'time'" #controls>
-        <div class="seg">
-          <button :class="{ on: chartKind === 'line' }" @click="chartKind = 'line'">Courbes</button>
-          <button :class="{ on: chartKind === 'bar' }" @click="chartKind = 'bar'">Colonnes</button>
-        </div>
-      </template>
-    </ChartCard>
-
-    <div class="totals">
-      <div v-for="(r, i) in results" :key="r.s.id" class="card total" :style="{ '--c': `var(--s${i + 1})` }">
-        <div class="serie-h"><span class="swatch" /><strong>Jeu {{ String.fromCharCode(65 + i) }}</strong></div>
-        <p class="hint">{{ seriesName(r.s) }}</p>
-        <div class="tv">{{ fmtTotal(r).value }}</div>
-        <div class="small secondary">{{ fmtTotal(r).qty }} · {{ fmtTotal(r).price }}</div>
-        <div v-if="fmtTotal(r).change !== null" class="small" :class="fmtTotal(r).change >= 0 ? 'up' : 'down'">{{ percent(fmtTotal(r).change) }} <span class="muted">sur un an</span></div>
+    <template v-if="items.length">
+      <div class="cards" :class="{ loading }">
+        <section v-for="d in items" :key="d.code" class="card prod" :style="{ borderTopColor: `var(--s${d.color})` }">
+          <RouterLink :to="`/produits/${d.code}`" class="nc code">{{ ncCode(d.code) }}</RouterLink>
+          <h2>{{ d.info.description }}</h2>
+          <p class="hint">{{ d.info.hs6Label }}</p>
+          <dl>
+            <dt>{{ FLOW[flow].title }}</dt><dd><strong>{{ eur(val(d)) }}</strong> <span :class="change(d) >= 0 ? 'up' : 'down'" class="small">{{ percent(change(d)) }} sur un an</span></dd>
+            <dt>Volume</dt><dd>{{ tonnes(kg(d)) }}</dd>
+            <dt>Prix moyen</dt><dd>{{ perKg(kg(d) ? val(d) / kg(d) : null) }}</dd>
+            <dt v-if="d.prices">Prix médian</dt><dd v-if="d.prices">{{ perKg(d.prices.overall?.median) }} <span class="hint">P25–P75 {{ perKg(d.prices.overall?.p25) }} – {{ perKg(d.prices.overall?.p75) }}</span></dd>
+          </dl>
+          <h3>{{ FLOW[flow].partners }}</h3>
+          <ol class="top">
+            <li v-for="p in d.partners.slice(0, 5)" :key="p.key"><Flag :code="p.key" /> <span>{{ p.label }}</span><span class="num">{{ sharePct(p[`${k}Eur`] / (val(d) || 1)) }}</span></li>
+          </ol>
+          <template v-if="d.eu.length">
+            <h3>{{ FLOW[flow].eu }}</h3>
+            <ol class="top">
+              <li v-for="p in d.eu.slice(0, 3)" :key="p.key"><Flag :code="p.key" /> <span>{{ p.label }}</span><span class="num">{{ sharePct(p[`${k}Eur`] / (val(d) || 1)) }}</span></li>
+            </ol>
+          </template>
+        </section>
       </div>
-    </div>
+
+      <div style="margin-top: 16px">
+        <ChartCard v-if="trend" :spec="trend" :height="320" :loading="loading">
+          <template #controls>
+            <div class="seg">
+              <button :class="{ on: measure === 'value' }" @click="measure = 'value'">Valeur</button>
+              <button :class="{ on: measure === 'quantity' }" @click="measure = 'quantity'">Volume</button>
+              <button :class="{ on: measure === 'price' }" @click="measure = 'price'">Prix au kg</button>
+            </div>
+            <label class="toggle"><input v-model="base100" type="checkbox" /> Base 100</label>
+          </template>
+        </ChartCard>
+      </div>
+      <div style="margin-top: 16px">
+        <ChartCard v-if="marketSpec" :spec="marketSpec" :height="hbarHeight(markets.length, items.length)" :loading="loading" />
+      </div>
+    </template>
   </div>
 </template>
 
 <style scoped>
-.presets { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin-bottom: 16px; }
-.preset { display: flex; flex-direction: column; gap: 2px; text-align: left; cursor: pointer; font: inherit; color: var(--text); padding: 12px 14px; }
-.preset:hover { border-color: var(--accent); }
-.series { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 12px; margin-bottom: 16px; }
-.serie { border-top: 4px solid var(--c); }
-.serie-h { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
-.swatch { width: 12px; height: 12px; border-radius: 3px; background: var(--c); flex: none; }
-.name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.serie-f { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.add { border: 2px dashed var(--border); background: transparent; color: var(--text-2); font: inherit; cursor: pointer; box-shadow: none; min-height: 120px; }
-.add:hover { border-color: var(--accent); color: var(--text); }
-.toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-bottom: 16px; }
-.chk { display: flex; gap: 6px; align-items: center; font-size: 0.85rem; color: var(--text-2); padding-bottom: 8px; }
-.totals { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-top: 16px; }
-.total { border-left: 4px solid var(--c); }
-.tv { font-size: 1.5rem; font-weight: 700; margin-top: 4px; }
-@media (max-width: 600px) { .series { grid-template-columns: 1fr; } .serie-f { grid-template-columns: 1fr; } }
+.setup { display: grid; gap: 14px; margin-bottom: 16px; }
+.chosen { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 8px 6px 10px; border-radius: 10px; border: 2px solid var(--border); background: var(--surface); max-width: 360px; }
+.chip .nc { white-space: nowrap; }
+.chip .lbl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.86rem; color: var(--text-2); }
+.sw { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.x { border: 0; background: none; color: var(--muted); font-size: 1.1rem; cursor: pointer; }
+.add { flex: 1; min-width: 280px; }
+.opts { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+.opts .field { min-width: 200px; }
+.cards { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.prod { border-top: 4px solid; display: flex; flex-direction: column; gap: 4px; }
+.prod .code { font-weight: 700; }
+.prod h2 { font-size: 0.98rem; line-height: 1.3; }
+dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; margin: 10px 0 4px; font-size: 0.88rem; }
+dt { color: var(--text-2); }
+dd { margin: 0; }
+h3 { margin: 10px 0 4px; font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.top { margin: 0; padding-left: 18px; display: grid; gap: 3px; font-size: 0.86rem; }
+.top li > span:nth-of-type(1) { margin-right: auto; }
+.top li { display: list-item; }
+.top .num { float: right; color: var(--text-2); }
+.toggle { display: inline-flex; gap: 6px; align-items: center; font-size: 0.82rem; color: var(--text-2); }
+.loading { opacity: 0.6; }
 </style>

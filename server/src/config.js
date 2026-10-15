@@ -43,4 +43,13 @@ export const config = {
   },
   // Inscription en libre-service (sinon, comptes créés par l'équipe commerciale)
   signupEnabled: process.env.SIGNUP_ENABLED !== 'false',
+  // Vendeur (mentions des factures)
+  seller: {
+    name: process.env.SELLER_NAME || 'DouaneData',
+    address: process.env.SELLER_ADDRESS || '',
+    siret: process.env.SELLER_SIRET || '',
+    vatNumber: process.env.SELLER_VAT || '',
+    iban: process.env.SELLER_IBAN || '',
+    email: process.env.SELLER_EMAIL || '',
+  },
 };

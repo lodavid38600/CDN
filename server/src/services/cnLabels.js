@@ -149,7 +149,8 @@ export async function refreshSearchText() {
   const ops = [];
   let n = 0;
   for await (const p of Product.find({}, { code: 1, description: 1, st: 1 }).lean().cursor()) {
-    const st = normalize([p.description, parents.get(p.code.slice(0, 6)), parents.get(p.code.slice(0, 4)), CHAPTERS[p.code.slice(0, 2)]].filter(Boolean).join(' '));
+    // Le libellé du chapitre n'entre pas dans le texte de recherche : trop large (« vinaigres » pour « vin »)
+    const st = normalize([p.description, parents.get(p.code.slice(0, 6)), parents.get(p.code.slice(0, 4))].filter(Boolean).join(' '));
     if (st !== p.st) ops.push({ updateOne: { filter: { _id: p._id }, update: { $set: { st } } } });
     if (ops.length >= 5000) { n += (await Product.bulkWrite(ops.splice(0), { ordered: false })).modifiedCount; }
   }
@@ -165,7 +166,13 @@ export async function searchProducts(q, { limit = 10, current = true } = {}) {
   const words = normalize(q).split(' ').filter((w) => w.length >= 2).slice(0, 6);
   if (!words.length) return [];
   const esc = (w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const rows = await Product.find({ ...base, $and: words.map((w) => ({ st: { $regex: `(^|\\s)${esc(w)}` } })) }, { _id: 0, code: 1, description: 1, status: 1, st: 1 }).limit(400).lean();
+  const wordRx = (w) => ({ $regex: `(^|\\s)${esc(w)}` });
+  let rows = await Product.find({ ...base, $and: words.map((w) => ({ st: wordRx(w) })) }, { _id: 0, code: 1, description: 1, status: 1, st: 1 }).limit(400).lean();
+  // Aucun produit ne correspond : on cherche dans les intitulés de chapitres (ex. « boissons »)
+  if (!rows.length) {
+    const chapters = Object.entries(CHAPTERS).filter(([, l]) => words.every((w) => new RegExp(`(^|\\s)${esc(w)}`).test(normalize(l)))).map(([c]) => c);
+    if (chapters.length) rows = await Product.find({ ...base, chapter: { $in: chapters } }, { _id: 0, code: 1, description: 1, status: 1 }).sort({ code: 1 }).limit(limit).lean();
+  }
   // Classement : mots présents dans la désignation du code d'abord, puis désignation la plus courte
   const score = (p) => {
     const d = normalize(p.description);

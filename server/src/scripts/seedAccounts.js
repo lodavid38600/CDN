@@ -113,11 +113,11 @@ export async function seedAccounts() {
     { title: 'Maintenance programmée', body: 'Une courte interruption est prévue le premier dimanche du mois entre 6 h et 7 h.', kind: 'maintenance', publishedAt: ago(60), author: admin._id },
   ]);
   await Coverage.insertMany([
-    { country: 'JP', status: 'en_cours', source: 'Douanes japonaises', eta: 'T1 2027' },
-    { country: 'KR', status: 'en_cours', source: 'Korea Customs Service', eta: 'T1 2027' },
-    { country: 'IN', status: 'prevu', source: 'Ministère indien du Commerce', eta: '2027' },
-    { country: 'BR', status: 'prevu', source: 'Comex Stat', eta: '2027' },
-    { country: 'CA', status: 'prevu', source: 'Statistique Canada', eta: '2027' },
+    { country: 'VN', status: 'en_cours', source: 'Douanes vietnamiennes', eta: 'T1 2027' },
+    { country: 'KZ', status: 'en_cours', source: 'Bureau national des statistiques', eta: 'T1 2027' },
+    { country: 'PH', status: 'prevu', source: 'Philippine Statistics Authority', eta: '2027' },
+    { country: 'PE', status: 'prevu', source: 'SUNAT', eta: '2027' },
+    { country: 'CO', status: 'prevu', source: 'DANE', eta: '2027' },
   ]);
   // Quelques événements au journal
   await AuditLog.insertMany([

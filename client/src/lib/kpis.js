@@ -15,7 +15,8 @@ export function flowKpis(s, measure = 'value', changeLabel = 'sur un an') {
     const others = ['value', 'quantity', 'price'].filter((m) => m !== measure).map((m) => FMT[m](s[`${f}${KEY[m]}`]));
     return {
       dot: f,
-      label: f === 'import' ? 'Importations' : 'Exportations',
+      label: f === 'import' ? 'Importations de l\'UE' : 'Exportations de l\'UE',
+      sub: f === 'import' ? 'achats aux pays hors UE' : 'ventes aux pays hors UE',
       value: FMT[measure](s[`${f}${KEY[measure]}`]),
       extra: others,
       change: s[`change${cap}${CHANGE[measure]}`] ?? null,

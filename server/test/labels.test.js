@@ -70,6 +70,8 @@ it('classeur Excel .xlsx : libellés importés, recherche par mots', async () =>
   assert.deepEqual((await searchProducts('telephones intelligents')).map((p) => p.code), ['85171300']);
   assert.deepEqual((await searchProducts('AOP mousseux')).map((p) => p.code), ['22042106']);
   assert.ok((await searchProducts('poissons')).some((p) => p.code === '03028990'), 'libellé de la position 0302');
+  // Libellé de chapitre : seulement à défaut de produit correspondant
+  assert.deepEqual((await searchProducts('legumes')).map((p) => p.code), ['07041000'], 'chapitre 07 « Légumes »');
   assert.deepEqual((await searchProducts('2204')).map((p) => p.code), ['22042106', '22042109']);
   assert.deepEqual(await searchProducts('zzzz'), []);
 });

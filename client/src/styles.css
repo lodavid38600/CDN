@@ -182,3 +182,30 @@ th.num { text-align: right; }
 @media print {
   body { background: #fff; }
 }
+
+/* ---------- Pastilles d'état ---------- */
+.pill { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 999px; font-size: 0.74rem; font-weight: 600; white-space: nowrap; background: var(--surface-2); color: var(--text-2); }
+.pill::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: 0.8; }
+.pill.ok { color: var(--good); background: color-mix(in srgb, var(--good) 10%, transparent); }
+.pill.bad { color: var(--bad); background: color-mix(in srgb, var(--bad) 10%, transparent); }
+.pill.warn { color: #9a6700; background: color-mix(in srgb, var(--s4) 16%, transparent); }
+.pill.info { color: var(--accent); background: var(--accent-wash); }
+:root[data-theme='dark'] .pill.warn { color: var(--s4); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme='light']) .pill.warn { color: var(--s4); } }
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 16px; overflow-x: auto; }
+.tabs button { border: 0; background: none; padding: 9px 14px; font: inherit; font-size: 0.9rem; color: var(--text-2); cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; }
+.tabs button.on { color: var(--text); border-color: var(--accent); font-weight: 600; }
+.form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px 16px; }
+.form-grid .wide { grid-column: 1 / -1; }
+.actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; flex-wrap: wrap; }
+.secret { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1.05rem; padding: 10px 12px; border-radius: 8px; background: var(--surface-2); user-select: all; }
+table.clickable tbody tr { cursor: pointer; }
+table.clickable tbody tr:hover td { background: var(--surface-2); }
+.stat-cards { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin-bottom: 16px; }
+.stat-cards .card { display: flex; flex-direction: column; gap: 4px; }
+.stat-cards strong { font-size: 1.5rem; font-variant-numeric: tabular-nums; }
+.stat-cards span { font-size: 0.82rem; color: var(--text-2); }
+.filters-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; margin-bottom: 14px; }
+.filters-row .field { min-width: 150px; }
+textarea { resize: vertical; min-height: 90px; }
+@media print { .no-print { display: none !important; } }

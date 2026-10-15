@@ -25,11 +25,11 @@ const chapterOpts = computed(() =>
     <div class="field wide"><span>Période</span>
       <PeriodPicker v-model:from="filters.periodFrom" v-model:to="filters.periodTo" />
     </div>
-    <div v-if="show('flow')" class="field flowf"><span>Flux</span>
+    <div v-if="show('flow')" class="field flowf"><span>Sens des échanges</span>
       <div class="seg flow">
         <button type="button" :class="{ on: !filters.flow }" @click="filters.flow = ''">Les deux</button>
-        <button type="button" :class="{ on: filters.flow === 'import' }" @click="filters.flow = 'import'">Import</button>
-        <button type="button" :class="{ on: filters.flow === 'export' }" @click="filters.flow = 'export'">Export</button>
+        <button type="button" :class="{ on: filters.flow === 'export' }" @click="filters.flow = 'export'">Exportations de l'UE</button>
+        <button type="button" :class="{ on: filters.flow === 'import' }" @click="filters.flow = 'import'">Importations de l'UE</button>
       </div>
     </div>
     <div v-if="show('reporters')" class="field"><span>Pays UE déclarant</span>
@@ -44,7 +44,7 @@ const chapterOpts = computed(() =>
     <div v-if="show('chapters')" class="field"><span>Chapitre NC02</span>
       <MultiSelect v-model="filters.chapters" :options="chapterOpts" placeholder="Tous" />
     </div>
-    <div v-if="show('product')" class="field wide"><span>Produit / code NC</span>
+    <div v-if="show('product')" class="field wide"><span>Produit</span>
       <NcSearch v-model="filters.product" />
     </div>
     <div class="actions">

@@ -48,8 +48,12 @@ export function createApp() {
     res.json({ status: 'ok', db: mongoose.connection.readyState === 1 ? 'up' : 'down' });
   });
 
-  app.use('/api/auth', rateLimit({ windowMs: 15 * 60 * 1000, limit: 50, standardHeaders: true, legacyHeaders: false }), authRoutes);
-  app.use('/api', rateLimit({ windowMs: 60 * 1000, limit: 300, standardHeaders: true, legacyHeaders: false }));
+  // Limite stricte sur les tentatives de connexion et d'inscription uniquement (pas sur la session)
+  const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 50, standardHeaders: true, legacyHeaders: false });
+  app.use(['/api/auth/login', '/api/auth/register'], authLimiter);
+  app.use('/api/auth', authRoutes);
+  // Par adresse IP : une société entière peut partager la même adresse (réseau d'entreprise)
+  app.use('/api', rateLimit({ windowMs: 60 * 1000, limit: 1000, standardHeaders: true, legacyHeaders: false }));
   const explore = [requireAuth, requireFeature('explore'), analysisFeatures];
   app.use('/api/home', requireAuth, homeRoutes);
   app.use('/api/company', requireAuth, companyRoutes);

@@ -72,10 +72,10 @@ watch(() => [code6.value, props.from, props.to, props.measure, flow.value], load
 watch(mirrorPair, loadMirror, { deep: true });
 
 const country = (c) => meta.worldCountries.find((x) => x.code === c);
-const SOURCE_LABEL = { eurostat: 'Eurostat', 'us-census': 'US Census', 'uk-hmrc': 'HMRC', ssb: 'SSB', comtrade: 'ONU', mirror: 'miroir', demo: 'démo' };
+const SOURCE_LABEL = { eurostat: 'Eurostat', 'us-census': 'US Census', 'uk-hmrc': 'HMRC', ssb: 'SSB', comtrade: 'ONU', mirror: 'reconstitué', demo: 'démonstration' };
 const badges = computed(() => Object.fromEntries(rows.value.map((r) => {
   const c = country(r.key);
-  const src = c?.mirrorOnly ? 'miroir' : (c?.sources || []).filter((x) => x !== 'mirror').map((x) => SOURCE_LABEL[x] || x).join(', ');
+  const src = c?.mirrorOnly ? 'reconstitué d\'après ses partenaires' : (c?.sources || []).filter((x) => x !== 'mirror').map((x) => SOURCE_LABEL[x] || x).join(', ');
   return [r.key, src];
 })));
 const top = computed(() => rows.value[0]);
@@ -90,11 +90,11 @@ const kpis = computed(() => flowKpis(summary.value, props.measure, 'sur un an'))
 
 const values = computed(() => Object.fromEntries(rows.value.map((r) => [r.key, key(r) || 0])));
 const details = computed(() => Object.fromEntries(rows.value.map((r) => [r.key, {
-  name: `${r.label}${country(r.key)?.mirrorOnly ? ' (miroir)' : ''}`,
+  name: `${r.label}${country(r.key)?.mirrorOnly ? ' (reconstitué)' : ''}`,
   lines: [`${flow.value === 'export' ? 'Export' : 'Import'} : ${eur(r[`${flow.value}Eur`])}`, `Volume : ${tonnes(r[`${flow.value}Kg`])}`, `Prix : ${perKg(r[`${flow.value}Price`])}`],
 }])));
-const rankC = computed(() => rankSpec({ rows: rows.value.slice(0, 15), measure: props.measure, flow: flow.value, title: `Principaux ${flowWord.value} mondiaux`, subtitle: `SH ${ncCode(code6.value)} · ${periodText.value} · tous pays déclarants (hors commerce intra-UE)` }));
-const trendC = computed(() => trendSpec({ rows: series.value, measure: props.measure, title: 'Commerce mondial couvert — évolution annuelle', subtitle: `SH ${ncCode(code6.value)} · somme des déclarations de tous les pays` }));
+const rankC = computed(() => rankSpec({ rows: rows.value.slice(0, 15), measure: props.measure, flow: flow.value, title: `Principaux ${flowWord.value} mondiaux`, subtitle: `${label.value} (${ncCode(code6.value)}) · ${periodText.value} · tous les pays, hors échanges entre pays de l'UE` }));
+const trendC = computed(() => trendSpec({ rows: series.value, measure: props.measure, title: 'Commerce mondial couvert — évolution annuelle', subtitle: `${label.value} (${ncCode(code6.value)}) · tous les pays` }));
 // Pas de déclaration croisée (aucune donnée mondiale pour ce couple) : pas de graphique
 const mirrorSpec = computed(() => (mirror.value?.totals && mirror.value.years?.length ? {
   kind: 'bar', unit: 'eur',
@@ -111,7 +111,7 @@ const pairOptions = computed(() => meta.worldCountries.filter((c) => !c.mirrorOn
 async function addToReport() {
   const img = await mapRef.value?.toImage().catch(() => null);
   reports.add([
-    { type: 'heading', text: `Marché mondial — SH ${ncCode(code6.value)} ${label.value}`, level: 2 },
+    { type: 'heading', text: `Marché mondial — ${label.value} (${ncCode(code6.value)})`, level: 2 },
     { type: 'kpis', items: kpis.value.map((k) => ({ label: k.label, value: k.value, sub: k.extra.join(' · ') })) },
     ...(img ? [{ type: 'image', src: img, caption: `Principaux ${flowWord.value} — ${periodText.value}` }] : []),
     { type: 'chart', spec: JSON.parse(JSON.stringify(rankC.value)) },
@@ -129,7 +129,7 @@ async function addToReport() {
           <button :class="{ on: flow === 'import' }" @click="flow = 'import'">Importateurs</button>
         </div>
       </div>
-      <p class="hint grow">Sous-position SH {{ ncCode(code6) }} {{ label }} : le niveau commun à tous les pays du monde. Sources nationales, Nations unies, et reconstitution miroir des pays qui ne publient pas.</p>
+      <p class="hint grow">{{ label }} ({{ ncCode(code6) }}) : les 6 premiers chiffres du code, communs à tous les pays du monde. Sources : statistiques nationales et Nations unies ; les pays qui ne publient pas sont reconstitués d'après les déclarations de leurs partenaires.</p>
       <button class="btn btn-sm" :disabled="!summary" @click="addToReport">＋ Monde au rapport</button>
     </div>
     <p v-if="error" class="error">{{ error }}</p>
@@ -143,12 +143,12 @@ async function addToReport() {
         <div class="hint">{{ badges[top.key] }}</div>
       </div>
       <KpiCard label="Part de l'UE" :value="euShare === null ? '—' : sharePct(euShare)" :sub="`des ${flowWord} déclarés (hors intra-UE)`" />
-      <KpiCard label="Pays couverts" :value="String(summary.reporterCount)" :sub="`${meta.worldCountries.filter((c) => c.mirrorOnly).length} reconstitués en miroir`" />
+      <KpiCard label="Pays couverts" :value="String(summary.reporterCount)" :sub="`dont ${meta.worldCountries.filter((c) => c.mirrorOnly).length} reconstitués d'après leurs partenaires`" />
     </div>
 
     <section class="card" style="margin-top: 16px">
       <div class="card-head">
-        <div><h2>Carte mondiale des {{ flowWord }}</h2><p>SH {{ ncCode(code6) }} · {{ periodText }} · intensité selon {{ measure === 'value' ? 'la valeur' : measure === 'quantity' ? 'le volume' : 'le prix moyen' }}</p></div>
+        <div><h2>Carte mondiale des {{ flowWord }}</h2><p>{{ label }} · {{ periodText }} · intensité selon {{ measure === 'value' ? 'la valeur' : measure === 'quantity' ? 'le volume' : 'le prix moyen' }}</p></div>
       </div>
       <WorldMap ref="mapRef" :values="values" :details="details" :formatter="fmt" :height="420" />
     </section>
@@ -165,7 +165,7 @@ async function addToReport() {
 
     <section class="card" style="margin-top: 16px">
       <div class="card-head">
-        <div><h2>Comparaison miroir</h2><p>Un même flux déclaré par l'exportateur et par l'importateur : un contrôle de cohérence des données</p></div>
+        <div><h2>Les deux côtés d'un même échange</h2><p>Ce que déclare le pays exportateur, comparé à ce que déclare le pays importateur</p></div>
         <div class="row">
           <label class="field">Exportateur <select v-model="mirrorPair.a"><option v-for="c in pairOptions" :key="c.code" :value="c.code">{{ c.name }}</option></select></label>
           <label class="field">Importateur <select v-model="mirrorPair.b"><option v-for="c in pairOptions" :key="c.code" :value="c.code">{{ c.name }}</option></select></label>

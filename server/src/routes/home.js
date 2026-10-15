@@ -32,11 +32,13 @@ router.get('/', async (req, res) => {
   const updates = [
     ...files.map((f) => ({ at: f.processedAt, kind: 'donnees', text: `Données de ${monthLabel(f.period)} intégrées (Eurostat)` })),
     ...runs.map((r) => ({ at: r.endedAt, kind: 'maj', text: r.status === 'success' ? 'Mise à jour automatique des données terminée' : 'Mise à jour automatique partielle (certaines sources indisponibles)' })),
-  ].filter((u) => u.at).sort((a, b) => b.at - a.at).slice(0, 6);
+    ...(data?.updatedAt ? [{ at: data.updatedAt, kind: 'maj', text: `Données mises à jour (jusqu'à ${range.last ? monthLabel(formatPeriod(range.last)) : '…'})` }] : []),
+  ].filter((u) => u.at).sort((a, b) => b.at - a.at)
+    .filter((u, i, all) => i === 0 || u.text !== all[i - 1].text).slice(0, 6);
 
   // Changements de codes NC récents (officiels), avec libellés
   const lastYear = range.last?.y || new Date().getFullYear();
-  const links = await NcLink.find({ level: 8, source: { $in: ['official', 'manual'] }, year: { $gte: lastYear - 2 }, $expr: { $ne: ['$from', '$to'] } }).sort({ year: -1 }).limit(60).lean();
+  const links = await NcLink.find({ level: 8, source: { $in: ['official', 'manual'] }, year: { $lte: lastYear + 1 }, $expr: { $ne: ['$from', '$to'] } }).sort({ year: -1, from: 1 }).limit(60).lean();
   const labels = new Map((await Product.find({ code: { $in: [...new Set(links.flatMap((l) => [l.from, l.to]))] } }, { code: 1, description: 1 }).lean()).map((p) => [p.code, p.description]));
   const byFrom = new Map();
   for (const l of links) {

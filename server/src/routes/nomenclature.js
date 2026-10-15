@@ -31,6 +31,7 @@ router.get('/:code', async (req, res) => {
   const parents = [{ code: chapter, level: 2, label: chapterName(chapter) }];
   let label = chapterName(chapter);
   let children = [];
+  let headings = null;
 
   if (code.length === 2) {
     const products = await Product.find({ chapter }, { code: 1, status: 1 }).lean();
@@ -43,6 +44,9 @@ router.get('/:code', async (req, res) => {
       productCount: under(h).filter((p) => p.status !== 'obsolete').length,
       obsolete: under(h).every((p) => p.status === 'obsolete'),
     })).sort((a, b) => Number(a.obsolete) - Number(b.obsolete) || a.code.localeCompare(b.code));
+    // Positions (NC4) pour regrouper les sous-positions
+    const h4 = [...new Set(hs6.map((h) => h.slice(0, 4)))];
+    headings = Object.fromEntries((await Nomenclature.find({ code: { $in: h4 } }, { code: 1, label: 1 }).lean()).map((n) => [n.code, n.label]));
   } else {
     const hs6 = code.slice(0, 6);
     const labels = await hs6Labels([hs6]);
@@ -69,7 +73,7 @@ router.get('/:code', async (req, res) => {
     code, level: code.length, label, chapter, section, history,
     chapterLabel: chapterName(chapter), sectionLabel: sectionName(section),
     parents: parents.filter((p) => p.code !== code),
-    children,
+    children, headings,
   });
 });
 

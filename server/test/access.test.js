@@ -194,3 +194,7 @@ it('anciens comptes (avant les sociétés) : migration automatique', async () =>
   assert.equal((await User.findOne({ email: 'ancien-admin@x.fr' })).staffRole, 'admin');
   assert.equal(await migrateLegacyUsers(), 0, 'idempotent');
 });
+
+it('limite des connexions : la session elle-même n\'est jamais bloquée', async () => {
+  for (let i = 0; i < 60; i++) await request(app).get('/api/auth/me').set(as('ownerA')).expect(200);
+});

@@ -8,7 +8,6 @@ import { useReportsStore } from '../stores/reports.js';
 import { trendSpec } from '../lib/specs.js';
 import PeriodPicker from '../components/PeriodPicker.vue';
 import NcSearch from '../components/NcSearch.vue';
-import WorldMap from '../components/WorldMap.vue';
 import Flag from '../components/Flag.vue';
 import DataChart from '../components/DataChart.vue';
 import RankTable from '../components/RankTable.vue';
@@ -18,7 +17,6 @@ import MeasureSwitch from '../components/MeasureSwitch.vue';
 const route = useRoute();
 const meta = useMetaStore();
 const reports = useReportsStore();
-const mapRef = ref(null);
 
 const mode = ref('partner');
 const flow = ref('');
@@ -43,12 +41,7 @@ const valueOf = (r) => {
   }
   return flow.value ? r[`${flow.value}${mk.value}`] : r[`import${mk.value}`] + r[`export${mk.value}`];
 };
-const values = computed(() => Object.fromEntries(rows.value.map((r) => [r.key, valueOf(r)])));
-const details = computed(() =>
-  Object.fromEntries(rows.value.map((r) => [r.key, { name: r.label, lines: [`Import : ${eur(r.importEur)} · ${tonnes(r.importKg)} · ${perKg(r.importPrice)}`, `Export : ${eur(r.exportEur)} · ${tonnes(r.exportKg)} · ${perKg(r.exportPrice)}`] }]))
-);
 const isEu = (code) => meta.reporters.some((c) => c.code === code);
-const euCodes = computed(() => meta.reporters.map((c) => c.code));
 const periodText = computed(() => rangeLabel(period.value.from, period.value.to));
 const sorted = computed(() => [...rows.value].sort((a, b) => valueOf(b) - valueOf(a)));
 
@@ -90,11 +83,6 @@ const panelSpec = computed(() =>
 watch([period, product], load, { deep: true });
 onMounted(load);
 
-async function addMap() {
-  const src = await mapRef.value.toImage();
-  const what = mode.value === 'partner' ? 'Partenaires hors UE' : mode.value === 'reporter' ? 'Pays UE déclarants' : 'Pays couverts';
-  reports.add([{ type: 'image', src, caption: `${what} — ${flow.value === 'import' ? 'importations' : flow.value === 'export' ? 'exportations' : 'échanges'}${product.value ? ` · NC ${ncCode(product.value)}` : ''} · ${periodText.value}` }], 'Carte');
-}
 function addPanel() {
   const p = panel.value;
   const s = p.summary;
@@ -117,25 +105,24 @@ function addPanel() {
   <div>
     <div class="page-head">
       <div>
-        <h1>Carte du monde</h1>
-        <p>Les {{ meta.reporters.length }} pays UE déclarants et {{ meta.partners.length }} partenaires hors UE couverts par les données</p>
+        <h1>Pays partenaires</h1>
+        <p>Les {{ meta.reporters.length }} pays de l'Union et leurs {{ meta.partners.length }} partenaires hors Union : choisissez un pays pour voir sa fiche.</p>
       </div>
-      <div class="page-actions"><button class="btn" @click="addMap">＋ Carte au rapport</button></div>
     </div>
 
     <div class="card toolbar">
       <div class="field"><span>Pays affichés</span>
         <div class="seg">
-          <button :class="{ on: mode === 'partner' }" @click="mode = 'partner'">Hors UE</button>
-          <button :class="{ on: mode === 'reporter' }" @click="mode = 'reporter'">UE</button>
+          <button :class="{ on: mode === 'partner' }" @click="mode = 'partner'">Partenaires hors UE</button>
+          <button :class="{ on: mode === 'reporter' }" @click="mode = 'reporter'">Pays de l'UE</button>
           <button :class="{ on: mode === 'all' }" @click="mode = 'all'">Tous</button>
         </div>
       </div>
       <div class="field"><span>Flux</span>
         <div class="seg">
-          <button :class="{ on: !flow }" @click="flow = ''">Les deux</button>
-          <button :class="{ on: flow === 'import' }" @click="flow = 'import'">Import</button>
-          <button :class="{ on: flow === 'export' }" @click="flow = 'export'">Export</button>
+          <button :class="{ on: !flow }" @click="flow = ''">Les deux sens</button>
+          <button :class="{ on: flow === 'export' }" @click="flow = 'export'">Exportations de l'UE</button>
+          <button :class="{ on: flow === 'import' }" @click="flow = 'import'">Importations de l'UE</button>
         </div>
       </div>
       <div class="field"><span>Mesure</span><MeasureSwitch v-model="measure" /></div>
@@ -145,8 +132,9 @@ function addPanel() {
     <p v-if="error" class="error">{{ error }}</p>
 
     <div class="layout" :class="{ loading, withPanel: panel }">
-      <section class="card mapcard">
-        <WorldMap ref="mapRef" :values="values" :details="details" :formatter="fmt" :selected="selected" :highlight="mode === 'all' ? euCodes : []" :height="520" @select="select" />
+      <section class="card">
+        <div class="card-head"><div><h2>{{ sorted.length }} pays</h2><p>{{ periodText }}{{ product ? ` · NC ${ncCode(product)}` : '' }} · cliquer sur un pays pour afficher sa fiche</p></div></div>
+        <RankTable :rows="sorted" :measure="measure" :flow="flow" key-label="Pays" @select="(r) => select(r.key)" />
       </section>
 
       <aside v-if="panel" class="card side">
@@ -159,9 +147,9 @@ function addPanel() {
           <button class="btn btn-sm btn-icon close" aria-label="Fermer" @click="panel = null; selected = ''">✕</button>
         </div>
         <div class="sk">
-          <div><span class="dot dot-import" />{{ panel.eu ? 'Importe (hors UE)' : "Vend à l'UE" }}<strong>{{ fmt(panel.summary[`import${mk}`]) }}</strong>
+          <div><span class="dot dot-import" />{{ panel.eu ? 'Importe depuis les pays hors UE' : "Vend à l'UE (importations de l'UE)" }}<strong>{{ fmt(panel.summary[`import${mk}`]) }}</strong>
             <span :class="panel.summary.changeImport >= 0 ? 'up' : 'down'">{{ percent(panel.summary.changeImport) }} <span class="muted">1 an</span></span></div>
-          <div><span class="dot dot-export" />{{ panel.eu ? 'Exporte (hors UE)' : "Achète à l'UE" }}<strong>{{ fmt(panel.summary[`export${mk}`]) }}</strong>
+          <div><span class="dot dot-export" />{{ panel.eu ? 'Exporte vers les pays hors UE' : "Achète à l'UE (exportations de l'UE)" }}<strong>{{ fmt(panel.summary[`export${mk}`]) }}</strong>
             <span :class="panel.summary.changeExport >= 0 ? 'up' : 'down'">{{ percent(panel.summary.changeExport) }} <span class="muted">1 an</span></span></div>
         </div>
         <DataChart v-if="panelSpec" :spec="panelSpec" :height="150" />
@@ -176,16 +164,12 @@ function addPanel() {
           </ul>
         </template>
         <div class="row" style="margin-top: 12px">
-          <RouterLink class="btn btn-sm btn-primary" :to="{ path: '/', query: { [panel.eu ? 'reporters' : 'partners']: panel.code, product: product || undefined, periodFrom: period.from || undefined, periodTo: period.to || undefined } }">Tableau de bord</RouterLink>
+          <RouterLink class="btn btn-sm btn-primary" :to="{ path: '/declarations', query: { [panel.eu ? 'reporters' : 'partners']: panel.code, product: product || undefined } }">Ses déclarations</RouterLink>
           <button class="btn btn-sm" @click="addPanel">＋ Au rapport</button>
         </div>
       </aside>
     </div>
 
-    <section class="card" style="margin-top: 16px">
-      <div class="card-head"><div><h2>Couverture des données</h2><p>{{ sorted.length }} pays · {{ periodText }}{{ product ? ` · NC ${ncCode(product)}` : '' }} · cliquer pour afficher la fiche pays</p></div></div>
-      <RankTable :rows="sorted" :measure="measure" :flow="flow" key-label="Pays" @select="(r) => select(r.key)" />
-    </section>
   </div>
 </template>
 
@@ -193,9 +177,8 @@ function addPanel() {
 .toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-bottom: 16px; }
 .grow { flex: 1; min-width: 220px; }
 .layout { display: grid; grid-template-columns: 1fr; gap: 16px; }
-.layout.withPanel { grid-template-columns: minmax(0, 1fr) 360px; }
-.mapcard { padding: 8px; }
-.side { align-self: start; }
+.layout.withPanel { grid-template-columns: minmax(0, 1fr) 380px; }
+.side { align-self: start; position: sticky; top: 72px; }
 .side-h { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; }
 .close { margin-left: auto; }
 .sk { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }

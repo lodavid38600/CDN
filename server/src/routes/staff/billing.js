@@ -6,6 +6,7 @@ import { nextSeq } from '../../models/System.js';
 import { PLANS, requirePerm } from '../../services/access.js';
 import { audit } from '../../services/audit.js';
 import { markOverdue } from '../../services/billing.js';
+import { config } from '../../config.js';
 
 // Factures (commercial et administrateur).
 const router = Router();
@@ -31,7 +32,7 @@ router.get('/invoices/:id', async (req, res) => {
   if (!validId(req.params.id)) return res.status(404).json({ error: 'Facture introuvable' });
   const inv = await Invoice.findById(req.params.id).populate('company', 'name').lean();
   if (!inv) return res.status(404).json({ error: 'Facture introuvable' });
-  res.json(inv);
+  res.json({ ...inv, seller: config.seller });
 });
 
 // Émission : lignes libres, ou abonnement de la société sur N mois

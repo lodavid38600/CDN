@@ -62,7 +62,7 @@ const local = ref({
   from: route.query.periodFrom || '', to: route.query.periodTo || '',
   reporters: route.query.reporters ? String(route.query.reporters).split(',') : [],
   partners: route.query.partners ? String(route.query.partners).split(',') : [],
-  flow: '',
+  flow: route.query.flow === 'import' ? 'import' : 'export', // un sens à la fois : la fiche reste lisible
 });
 const measure = ref('value');
 const granularity = ref('month');
@@ -135,7 +135,7 @@ async function loadForecast() {
 watch(() => props.code, async () => { await meta.load(); fitGranularity(); load(); }, { immediate: true });
 watch(() => [local.value.from, local.value.to], fitGranularity);
 watch(() => JSON.stringify(local.value), () => {
-  router.replace({ query: Object.fromEntries(Object.entries({ periodFrom: local.value.from, periodTo: local.value.to, reporters: local.value.reporters.join(','), partners: local.value.partners.join(',') }).filter(([, v]) => v)) });
+  router.replace({ query: Object.fromEntries(Object.entries({ flow: local.value.flow === 'import' ? 'import' : '', periodFrom: local.value.from, periodTo: local.value.to, reporters: local.value.reporters.join(','), partners: local.value.partners.join(',') }).filter(([, v]) => v)) });
   load();
 });
 watch(granularity, async (g) => {
@@ -180,7 +180,7 @@ const peakMonth = computed(() => {
 
 const trend = computed(() =>
   trendSpec({
-    rows: series.value, fc: chartKind.value === 'line' ? fc.value : null, measure: measure.value, flow: local.value.flow,
+    rows: series.value, fc: chartKind.value === 'line' ? fc.value : null, measure: measure.value, flow: '', // les deux sens, chacun nommé
     kind: chartKind.value === 'line' ? 'line' : 'bar',
     title: `Évolution ${GRANULARITY_WORD[granularity.value]} — ${ncCode(props.code)}`,
     subtitle: `${product.value?.description || ''} · ${periodText.value}`,
@@ -188,8 +188,8 @@ const trend = computed(() =>
 );
 const seasonSpec = computed(() => seasonalitySpec({ rows: monthly.value, measure: measure.value, title: 'Saisonnalité', subtitle: 'Moyenne par mois calendaire sur la période' }));
 const priceSpec = computed(() => unitPriceSpec({ rows: series.value, title: 'Prix moyen au kilo', subtitle: 'Valeur / quantité, import et export' }));
-const partnerSpec = computed(() => rankSpec({ rows: partners.value.slice(0, 12), measure: measure.value, flow: local.value.flow, title: 'Partenaires hors UE', subtitle: `${product.value?.description || ''} · ${periodText.value}` }));
-const reporterSpec = computed(() => rankSpec({ rows: reporters.value.slice(0, 12), measure: measure.value, flow: local.value.flow, title: 'Pays UE déclarants', subtitle: `${product.value?.description || ''} · ${periodText.value}` }));
+const partnerSpec = computed(() => rankSpec({ rows: partners.value.slice(0, 12), measure: measure.value, flow: local.value.flow, title: F.value.partners, subtitle: `${F.value.title} · ${product.value?.description || ''} · ${periodText.value}` }));
+const reporterSpec = computed(() => rankSpec({ rows: reporters.value.slice(0, 12), measure: measure.value, flow: local.value.flow, title: F.value.eu, subtitle: `${F.value.title} · ${product.value?.description || ''} · ${periodText.value}` }));
 
 // Carte : partenaires hors UE ou pays déclarants UE
 const mapRows = computed(() => (mapMode.value === 'partner' ? partners.value : reporters.value));
@@ -203,6 +203,10 @@ function pickCountry(code) {
   local.value[key] = local.value[key].includes(code) ? local.value[key].filter((c) => c !== code) : [code];
 }
 
+// Le sens des échanges, dit en clair partout sur la fiche
+const F = computed(() => (local.value.flow === 'import'
+  ? { title: 'Importations de l\'UE', long: 'importations de l\'UE depuis les pays hors UE', partners: 'Pays d\'origine (fournisseurs hors UE)', eu: 'Pays de l\'UE importateurs', mapPartner: 'Pays d\'origine', mapEu: 'Pays de l\'UE importateurs' }
+  : { title: 'Exportations de l\'UE', long: 'exportations de l\'UE vers les pays hors UE', partners: 'Pays de destination (clients hors UE)', eu: 'Pays de l\'UE exportateurs', mapPartner: 'Pays de destination', mapEu: 'Pays de l\'UE exportateurs' }));
 const reportTitle = computed(() => `${ncCode(props.code)} — ${product.value?.description || ''}`);
 async function generateReport() {
   const s = summary.value;
@@ -241,7 +245,7 @@ async function addMapToReport() {
 <template>
   <div>
     <nav class="crumbs" aria-label="Fil d'Ariane">
-      <RouterLink to="/nomenclature">Nomenclature</RouterLink>
+      <RouterLink to="/nomenclature">Produits</RouterLink>
       <template v-if="node">
         <span class="sep">›</span><span>Section {{ node.section }}</span>
         <template v-for="p in node.parents" :key="p.code"><span class="sep">›</span><RouterLink :to="`/nomenclature/${p.code}`" :title="p.label">{{ ncCode(p.code) }} {{ p.level === 2 ? p.label : '' }}</RouterLink></template>
@@ -262,8 +266,8 @@ async function addMapToReport() {
           </div>
         </div>
         <div class="page-actions">
-          <RouterLink class="btn" :to="{ path: '/comparateur', query: { preset: 'flows', product: code } }">⇄ Exportateurs vs importateurs</RouterLink>
-          <RouterLink class="btn" :to="{ path: '/explorer', query: { product: code, periodFrom: local.from || undefined, periodTo: local.to || undefined } }">Lignes détaillées</RouterLink>
+          <RouterLink class="btn" :to="{ path: '/comparateur', query: { codes: code } }">⇄ Comparer avec d'autres produits</RouterLink>
+          <RouterLink class="btn" :to="{ path: '/declarations', query: { product: code, periodFrom: local.from || undefined, periodTo: local.to || undefined } }">Déclarations mois par mois</RouterLink>
           <button class="btn btn-primary" :disabled="!summary" @click="generateReport">📄 Générer un rapport</button>
         </div>
       </div>
@@ -271,18 +275,18 @@ async function addMapToReport() {
       <NcHistory v-model:raw="raw" :history="product.history" :code="code" />
 
       <SectionNav :sections="SECTIONS" />
+      <p class="context">Vous regardez les <strong>{{ F.long }}</strong> · <strong>{{ periodText || 'toute la période' }}</strong><span v-if="local.reporters.length"> · {{ local.reporters.map(meta.countryName).join(', ') }}</span><span v-if="local.partners.length"> · avec {{ local.partners.map(meta.countryName).join(', ') }}</span></p>
 
       <div class="card toolbar">
         <div class="field wide"><span>Période</span><PeriodPicker v-model:from="local.from" v-model:to="local.to" /></div>
-        <div class="field"><span>Flux</span>
+        <div class="field wide"><span>Sens des échanges</span>
           <div class="seg">
-            <button :class="{ on: !local.flow }" @click="local.flow = ''">Les deux</button>
-            <button :class="{ on: local.flow === 'import' }" @click="local.flow = 'import'">Import</button>
-            <button :class="{ on: local.flow === 'export' }" @click="local.flow = 'export'">Export</button>
+            <button :class="{ on: local.flow === 'export' }" @click="local.flow = 'export'">Exportations de l'UE</button>
+            <button :class="{ on: local.flow === 'import' }" @click="local.flow = 'import'">Importations de l'UE</button>
           </div>
         </div>
-        <div class="field"><span>Pays UE déclarant</span><MultiSelect v-model="local.reporters" :options="countryOpts(meta.reporters)" placeholder="Toute l'UE" flags /></div>
-        <div class="field"><span>Partenaire hors UE</span><MultiSelect v-model="local.partners" :options="countryOpts(meta.partners)" placeholder="Tous" flags /></div>
+        <div class="field"><span>Pays de l'UE</span><MultiSelect v-model="local.reporters" :options="countryOpts(meta.reporters)" placeholder="Toute l'UE" flags /></div>
+        <div class="field"><span>Pays hors UE</span><MultiSelect v-model="local.partners" :options="countryOpts(meta.partners)" placeholder="Tous" flags /></div>
         <div class="field"><span>Mesure</span>
           <MeasureSwitch v-model="measure" />
         </div>
@@ -306,7 +310,7 @@ async function addMapToReport() {
         </div>
       </div>
 
-      <h2 id="evolution" class="sec-title">Évolution des valeurs, volumes et prix</h2>
+      <h2 id="evolution" class="sec-title">Évolution des importations et des exportations de l'UE</h2>
       <div>
         <ChartCard :spec="trend" :height="320" pickable :loading="loading" @pick="(i) => (drawer = series[i]?.period || '')">
           <template #controls>
@@ -331,17 +335,17 @@ async function addMapToReport() {
         <ChartCard :spec="priceSpec" :height="240" :loading="loading" />
       </div>
 
-      <h2 id="prix" class="sec-title">Prix & volumes par pays</h2>
+      <h2 id="prix" class="sec-title">Prix et volumes par pays · {{ F.long }}</h2>
       <PriceAnalysis :product="code" :label="reportTitle" :from="local.from" :to="local.to" :reporters="local.reporters" :partners="local.partners" :raw="raw" :flow="local.flow" />
 
-      <h2 id="pays" class="sec-title">Pays partenaires et déclarants</h2>
+      <h2 id="pays" class="sec-title">Pays · {{ F.long }}</h2>
       <section class="card">
         <div class="card-head">
-          <div><h2>Carte des échanges</h2><p>{{ product.description }} · {{ periodText }} · cliquer sur un pays pour filtrer</p></div>
+          <div><h2>Carte des {{ F.long }}</h2><p>{{ product.description }} · {{ periodText }} · cliquer sur un pays pour filtrer</p></div>
           <div class="row">
             <div class="seg">
-              <button :class="{ on: mapMode === 'partner' }" @click="mapMode = 'partner'">Partenaires hors UE</button>
-              <button :class="{ on: mapMode === 'reporter' }" @click="mapMode = 'reporter'">Pays UE</button>
+              <button :class="{ on: mapMode === 'partner' }" @click="mapMode = 'partner'">{{ F.mapPartner }}</button>
+              <button :class="{ on: mapMode === 'reporter' }" @click="mapMode = 'reporter'">{{ F.mapEu }}</button>
             </div>
             <button class="btn btn-sm" @click="addMapToReport">＋ Au rapport</button>
           </div>
@@ -354,18 +358,18 @@ async function addMapToReport() {
         <ChartCard :spec="partnerSpec" :height="hbarHeight(Math.min(12, partners.length), local.flow ? 1 : 2)" pickable :loading="loading" @pick="(i) => pickCountry(partners[i]?.key)" />
         <ChartCard :spec="reporterSpec" :height="hbarHeight(Math.min(12, reporters.length), local.flow ? 1 : 2)" :loading="loading" />
         <section class="card">
-          <div class="card-head"><h2>Tous les partenaires ({{ partners.length }})</h2></div>
+          <div class="card-head"><div><h2>{{ F.partners }} ({{ partners.length }})</h2><p>{{ F.title }} · {{ periodText }}</p></div></div>
           <div class="scroll"><RankTable :rows="partners" :measure="measure" :flow="local.flow" key-label="Pays" @select="(r) => pickCountry(r.key)" /></div>
         </section>
         <section class="card">
-          <div class="card-head"><h2>Pays UE déclarants ({{ reporters.length }})</h2></div>
+          <div class="card-head"><div><h2>{{ F.eu }} ({{ reporters.length }})</h2><p>{{ F.title }} · {{ periodText }}</p></div></div>
           <div class="scroll"><RankTable :rows="reporters" :measure="measure" :flow="local.flow" key-label="Pays" /></div>
         </section>
       </div>
 
       <section class="card" style="margin-top: 16px">
         <div class="card-head">
-          <div><h2>Qui commerce avec qui ?</h2><p>Principaux pays UE déclarants × partenaires hors UE · {{ local.flow === 'import' ? 'importations' : local.flow === 'export' ? 'exportations' : 'import + export' }}</p></div>
+          <div><h2>Qui commerce avec qui ?</h2><p>{{ F.title }} · pays de l'UE (lignes) × {{ local.flow === 'import' ? 'pays d\'origine' : 'pays de destination' }} (colonnes) · {{ periodText }}</p></div>
         </div>
         <Heatmap :data="matrix" />
       </section>
@@ -378,7 +382,7 @@ async function addMapToReport() {
         </p>
       </section>
 
-      <h2 id="monde" class="sec-title">Marché mondial · SH {{ ncCode(code.slice(0, 6)) }}</h2>
+      <h2 id="monde" class="sec-title">Marché mondial · tous les pays du monde</h2>
       <WorldMarket :code="code" :from="local.from" :to="local.to" :measure="measure" :flow="local.flow" />
     </template>
     <PeriodDrawer :period="drawer" :params="{ product: code, reporters: local.reporters, partners: local.partners }" :context="`NC ${ncCode(code)}`" @close="drawer = ''" />
@@ -399,6 +403,7 @@ async function addMapToReport() {
 .extremes li { display: grid; grid-template-columns: auto 1fr auto 80px; gap: 8px; align-items: center; }
 .extremes .small { text-align: right; }
 .ext-h { margin: 10px 0 6px; font-size: 0.76rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.context { margin: -6px 0 14px; font-size: 0.9rem; color: var(--text-2); }
 .sec-title { margin: 32px 0 12px; font-size: 1.25rem; scroll-margin-top: 120px; }
 .anchor { scroll-margin-top: 120px; }
 .insight { display: flex; gap: 12px; align-items: center; margin-top: 16px; background: var(--accent-wash); }

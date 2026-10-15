@@ -1,165 +1,63 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue';
+import { ref, watch } from 'vue';
 import { api } from '../api.js';
-import { integer, periodLabel } from '../format.js';
 import { useAuthStore } from '../stores/auth.js';
-import { useMetaStore } from '../stores/meta.js';
 import { useUiStore } from '../stores/ui.js';
+import { COMPANY_ROLE, STAFF_ROLE, dateFr } from '../lib/labels.js';
 
 const auth = useAuthStore();
-const meta = useMetaStore();
 const ui = useUiStore();
-const status = ref(null);
-const launching = ref(false);
+const profile = ref({ name: '', jobTitle: '', phone: '' });
+watch(() => auth.user, (u) => { if (u) profile.value = { name: u.name, jobTitle: u.jobTitle, phone: u.phone }; }, { immediate: true });
+const pw = ref({ current: '', next: '', confirm: '' });
+const error = ref('');
 
-async function loadStatus() {
-  if (auth.user?.role !== 'admin') return;
-  status.value = await api('/admin/status').catch(() => null);
+async function saveProfile() {
+  try { await api('/auth/me', { method: 'PUT', body: profile.value }); await auth.fetchMe(); ui.toast('Profil enregistré'); } catch (e) { error.value = e.message; }
 }
-onMounted(async () => {
-  await auth.fetchMe().catch(() => {});
-  meta.load().catch(() => {});
-  loadStatus();
-});
-async function launch(steps) {
-  launching.value = true;
+async function savePassword() {
+  error.value = '';
+  if (pw.value.next !== pw.value.confirm) { error.value = 'Les deux mots de passe ne correspondent pas'; return; }
   try {
-    await api('/admin/update', { method: 'POST', body: steps ? { steps } : {} });
-    ui.toast('Mise à jour lancée en arrière-plan');
-    setTimeout(loadStatus, 4000);
-  } finally {
-    launching.value = false;
-  }
+    await api('/auth/me/password', { method: 'PUT', body: { current: pw.value.current, next: pw.value.next } });
+    pw.value = { current: '', next: '', confirm: '' };
+    ui.toast('Mot de passe modifié');
+  } catch (e) { error.value = e.message; }
 }
-const count = (arr, id) => arr?.find((x) => x._id === id)?.n ?? 0;
-const links = computed(() => {
-  const out = { official: 0, inferred: 0, manual: 0, implicit: 0 };
-  for (const l of status.value?.links || []) if (l._id.level === 8) out[l._id.source] = l.n;
-  return out;
-});
-const BULK_LABEL = { processed: 'chargé(s)', failed: 'en échec', missing: 'non publié(s)' };
-const STATUS_LABEL = { success: 'réussie', partial: 'partielle', failed: 'en échec', running: 'en cours' };
-const SOURCE_LABEL = { eurostat: 'Eurostat', 'us-census': 'US Census', 'uk-hmrc': 'HMRC', ssb: 'SSB', comtrade: 'UN Comtrade', mirror: 'Miroirs' };
-
-const plans = [
-  { id: 'free', name: 'Gratuit', price: '0 €', features: ['Tableau de bord, nomenclature, carte et comparateur', 'Rapports et exports PDF / PowerPoint', 'Export CSV limité à 1 000 lignes'] },
-  { id: 'pro', name: 'Pro', price: '49 € / mois', features: ['Tout le plan Gratuit', 'Export CSV jusqu\'à 100 000 lignes', 'Prévisions et comparaisons illimitées', 'Accès API (jeton JWT)', 'Support prioritaire'] },
-];
 </script>
 
 <template>
   <div>
-    <div class="page-head"><div><h1>Compte & données</h1><p>Profil, offre, fraîcheur et qualité des données</p></div></div>
-    <div class="grid grid-2">
-      <section v-if="auth.user" class="card">
-        <h2>Profil</h2>
-        <dl>
-          <dt>E-mail</dt><dd>{{ auth.user.email }}</dd>
-          <dt>Nom</dt><dd>{{ auth.user.name || '—' }}</dd>
-          <dt>Société</dt><dd>{{ auth.user.company || '—' }}</dd>
-          <dt>Offre</dt><dd><span class="badge">{{ auth.user.plan === 'pro' ? 'Pro' : 'Gratuit' }}</span></dd>
-        </dl>
+    <div class="page-head"><div><h1>Mon compte</h1><p>{{ auth.user?.email }}</p></div></div>
+    <p v-if="error" class="error">{{ error }}</p>
+    <div v-if="auth.user" class="grid grid-2">
+      <section class="card">
+        <div class="card-head"><div><h2>Profil</h2>
+          <p v-if="auth.isStaff">Équipe DouaneData · {{ STAFF_ROLE[auth.access.staffRole] }}</p>
+          <p v-else-if="auth.company">{{ auth.company.name }} · {{ COMPANY_ROLE[auth.user.companyRole] }} · membre depuis le {{ dateFr(auth.user.createdAt) }}</p>
+        </div></div>
+        <form class="form-grid" @submit.prevent="saveProfile">
+          <label class="field">Nom<input v-model="profile.name" /></label>
+          <label class="field">Fonction<input v-model="profile.jobTitle" /></label>
+          <label class="field">Téléphone<input v-model="profile.phone" /></label>
+          <div class="actions wide"><button class="btn btn-primary">Enregistrer</button></div>
+        </form>
       </section>
       <section class="card">
-        <h2>Sources</h2>
-        <p class="secondary">Les données proviennent des <strong>fichiers bulk Comext</strong> d'Eurostat (base constituée et mise à jour par fichiers mensuels complets, sans dépendre des limites de l'API) (commerce international de marchandises de l'UE, nomenclature combinée à 8 chiffres). Valeurs en euros courants, quantités en kilogrammes. Flux « extra-UE » : échanges des 27 États membres avec les pays tiers.</p>
-        <p class="muted">Les données de démonstration sont simulées à partir de codes NC réels ; lancez « npm run bulk:sync » pour charger les données officielles.</p>
+        <div class="card-head"><div><h2>Mot de passe</h2><p>8 caractères minimum</p></div></div>
+        <form class="form-grid" @submit.prevent="savePassword">
+          <label class="field wide">Mot de passe actuel<input v-model="pw.current" type="password" required autocomplete="current-password" /></label>
+          <label class="field">Nouveau mot de passe<input v-model="pw.next" type="password" required minlength="8" autocomplete="new-password" /></label>
+          <label class="field">Confirmation<input v-model="pw.confirm" type="password" required minlength="8" autocomplete="new-password" /></label>
+          <div class="actions wide"><button class="btn btn-primary">Changer le mot de passe</button></div>
+        </form>
       </section>
-    </div>
-    <section class="card" style="margin-top: 16px">
-      <div class="card-head">
-        <div>
-          <h2>État des données</h2>
-          <p>Données disponibles jusqu'à {{ meta.lastPeriod ? periodLabel(meta.lastPeriod) : '…' }} · version {{ meta.data?.version ?? '—' }}<span v-if="meta.data?.updatedAt"> · actualisées le {{ new Date(meta.data.updatedAt).toLocaleString('fr-FR') }}</span></p>
-        </div>
-        <div v-if="auth.user?.role === 'admin'" class="row">
-          <button class="btn btn-sm" :disabled="launching" @click="launch(['sync'])">Resynchroniser la nomenclature</button>
-          <button class="btn btn-sm btn-primary" :disabled="launching" @click="launch()">Mettre à jour maintenant</button>
-        </div>
-      </div>
-      <p class="secondary">Les données se mettent à jour automatiquement : nouveaux mois et révisions Eurostat, sources nationales, tables de correspondance de la nomenclature. Les changements de codes NC sont gérés sans intervention : les séries restent continues.</p>
-
-      <template v-if="status">
-        <div class="stats">
-          <div><strong>{{ integer(status.flows) }}</strong><span>lignes UE (NC8)</span></div>
-          <div><strong>{{ integer((status.world || []).reduce((s, x) => s + x.n, 0)) }}</strong><span>lignes monde (SH6)</span></div>
-          <div><strong>{{ count(status.codes, 'current') }}</strong><span>codes NC actuels</span></div>
-          <div><strong>{{ count(status.codes, 'obsolete') }}</strong><span>codes remplacés (convertis)</span></div>
-          <div><strong>{{ links.official }} + {{ links.inferred }}</strong><span>correspondances officielles + déduites</span></div>
-          <div><strong>{{ integer(status.rejected) }}</strong><span>lignes en quarantaine (90 j)</span></div>
-          <div><strong>{{ integer(status.suspectRows) }}</strong><span>lignes signalées (prix aberrant…)</span></div>
-        </div>
-        <div class="grid grid-2" style="margin-top: 12px">
-          <div>
-            <h3>Dernières mises à jour</h3>
-            <table>
-              <thead><tr><th>Début</th><th>Statut</th><th>Durée</th></tr></thead>
-              <tbody>
-                <tr v-for="r in status.runs" :key="r._id">
-                  <td>{{ new Date(r.startedAt).toLocaleString('fr-FR') }}</td>
-                  <td><span class="badge" :class="{ ok: r.status === 'success', ko: r.status === 'failed' }">{{ STATUS_LABEL[r.status] || r.status }}</span></td>
-                  <td>{{ r.endedAt ? `${Math.round((new Date(r.endedAt) - new Date(r.startedAt)) / 1000)} s` : '…' }}</td>
-                </tr>
-                <tr v-if="!status.runs.length"><td colspan="3" class="muted">Aucune mise à jour automatique pour l'instant.</td></tr>
-              </tbody>
-            </table>
-          </div>
-          <div>
-            <h3>Sources</h3>
-            <table>
-              <tbody>
-                <tr v-for="w in status.world" :key="w._id"><td>{{ SOURCE_LABEL[w._id] || w._id }}</td><td class="num">{{ integer(w.n) }} lignes</td></tr>
-              </tbody>
-            </table>
-            <p class="hint" style="margin-top: 8px">Mise à jour automatique : {{ status.autoUpdate.enabled ? `activée (toutes les ${status.autoUpdate.intervalHours} h, ${status.autoUpdate.months} derniers mois)` : 'désactivée (AUTO_UPDATE=true pour l\'activer)' }}<span v-if="status.autoUpdate.worldSources.length"> · sources : {{ status.autoUpdate.worldSources.join(', ') }}</span></p>
-            <template v-if="status.bulk">
-              <h3>Fichiers bulk Eurostat</h3>
-              <p class="hint">Source principale de la base (depuis {{ status.bulk.from }}) : seuls les fichiers nouveaux ou révisés sont retéléchargés.
-                <span v-for="c in status.bulk.counts" :key="c._id"> · {{ c.n }} {{ BULK_LABEL[c._id] || c._id }}<template v-if="c._id === 'processed'"> (jusqu'à {{ c.last }})</template></span>
-                <span v-if="!status.bulk.counts.length"> · aucun fichier chargé pour l'instant (npm run bulk:sync).</span>
-              </p>
-              <table v-if="status.bulk.files.length">
-                <tbody>
-                  <tr v-for="f in status.bulk.files.slice(0, 8)" :key="f._id">
-                    <td>{{ f.period || f.name }}</td>
-                    <td><span class="badge" :class="{ ok: f.status === 'processed', ko: f.status === 'failed' }">{{ BULK_LABEL[f.status] || f.status }}</span></td>
-                    <td class="num">{{ f.status === 'processed' ? `${integer(f.stats?.kept || 0)} lignes` : f.error }}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </template>
-            <template v-if="status.rejectedReasons.length">
-              <h3>Motifs de quarantaine</h3>
-              <ul class="reasons"><li v-for="r in status.rejectedReasons" :key="r._id">{{ r._id }} <span class="muted">({{ r.n }})</span></li></ul>
-            </template>
-          </div>
-        </div>
-      </template>
-    </section>
-
-    <h2 style="margin: 24px 0 12px">Offres</h2>
-    <div class="grid grid-2">
-      <section v-for="p in plans" :key="p.id" class="card plan" :class="{ current: auth.user?.plan === p.id }">
-        <div class="card-head"><h2>{{ p.name }}</h2><strong>{{ p.price }}</strong></div>
-        <ul><li v-for="f in p.features" :key="f">{{ f }}</li></ul>
-        <span v-if="auth.user?.plan === p.id" class="badge">Offre actuelle</span>
+      <section class="card">
+        <h2>D'où viennent les données ?</h2>
+        <p class="secondary" style="margin-top: 8px">Les échanges des 27 pays de l'Union européenne avec le reste du monde proviennent d'<strong>Eurostat</strong>, l'office statistique de l'Union, code produit par code produit (nomenclature combinée à 8 chiffres), mois par mois. Les valeurs sont en euros courants, les quantités en kilogrammes.</p>
+        <p class="secondary" style="margin-top: 8px">Pour les pays hors Union, nous complétons avec les publications officielles des pays concernés et des Nations unies. Lorsque la nomenclature évolue, les séries restent comparables d'une année sur l'autre.</p>
+        <p class="hint" style="margin-top: 8px">La liste des pays couverts et les dernières mises à jour sont sur la page d'<RouterLink to="/">accueil</RouterLink>.</p>
       </section>
     </div>
   </div>
 </template>
-
-<style scoped>
-.stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-top: 14px; }
-.stats > div { display: flex; flex-direction: column; background: var(--surface-2); border-radius: 10px; padding: 10px 12px; }
-.stats strong { font-size: 1.25rem; }
-.stats span { font-size: 0.78rem; color: var(--text-2); }
-h3 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin: 8px 0; }
-.badge.ok { color: var(--good); }
-.badge.ko { color: var(--bad); }
-.reasons { margin: 0; padding-left: 18px; font-size: 0.85rem; }
-dl { display: grid; grid-template-columns: 100px 1fr; gap: 8px; margin: 12px 0 0; }
-dt { color: var(--muted); }
-dd { margin: 0; }
-.plan ul { padding-left: 18px; color: var(--text-2); }
-.plan.current { border-color: var(--accent); }
-</style>

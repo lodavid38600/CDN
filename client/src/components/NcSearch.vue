@@ -3,10 +3,11 @@ import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { api } from '../api.js';
 import { ncCode } from '../format.js';
 
-// Champ de recherche d'un code NC (code ou désignation), avec suggestions.
+// Recherche d'un produit par mots (« vin mousseux », « smartphones »…) ou par code NC, avec suggestions :
+// chaque code est présenté avec sa désignation et sa famille de produits.
 const props = defineProps({
   modelValue: { type: String, default: '' },
-  placeholder: { type: String, default: 'Code NC ou produit (ex. 2204, choux…)' },
+  placeholder: { type: String, default: 'Un produit (vin, choux, smartphones…) ou un code NC' },
 });
 const emit = defineEmits(['update:modelValue', 'select']);
 const text = ref(props.modelValue);
@@ -25,7 +26,7 @@ watch(text, (v) => {
   if (q.length < 2) { results.value = []; return; }
   timer = setTimeout(async () => {
     try {
-      results.value = (await api('/products', { params: { q, limit: 8 } })).rows;
+      results.value = (await api('/products', { params: { q, limit: 12 } })).rows;
       // Les suggestions ne s'ouvrent que pendant la saisie (pas au remplissage depuis l'URL).
       open.value = document.activeElement === input.value;
       active.value = -1;
@@ -62,7 +63,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onDoc));
     <ul v-if="open && results.length" class="sug" role="listbox">
       <li v-for="(p, i) in results" :key="p.code" role="option" :aria-selected="i === active" :class="{ on: i === active }" @mousedown.prevent="choose(p)">
         <span class="nc code">{{ ncCode(p.code) }}</span>
-        <span class="d">{{ p.description }}</span>
+        <span class="d"><span class="t">{{ p.description }}</span><span v-if="p.hs6Label && p.hs6Label !== p.description" class="fam">{{ p.hs6Label }}</span></span>
       </li>
     </ul>
   </div>
@@ -72,9 +73,11 @@ onBeforeUnmount(() => document.removeEventListener('click', onDoc));
 .ncs { position: relative; }
 .ncs input { width: 100%; padding-right: 28px; }
 .x { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); border: 0; background: none; color: var(--muted); font-size: 1.1rem; cursor: pointer; }
-.sug { position: absolute; z-index: 45; top: calc(100% + 4px); left: 0; width: max(100%, 380px); list-style: none; margin: 0; padding: 4px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow-pop); }
+.sug { position: absolute; z-index: 45; top: calc(100% + 4px); left: 0; width: max(100%, 440px); max-width: calc(100vw - 32px); max-height: 60vh; overflow-y: auto; list-style: none; margin: 0; padding: 4px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow-pop); }
 .sug li { display: grid; grid-template-columns: 96px 1fr; gap: 8px; padding: 7px 8px; border-radius: 6px; cursor: pointer; font-size: 0.86rem; }
 .sug li:hover, .sug li.on { background: var(--surface-2); }
 .code { color: var(--accent); }
-.d { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.d { display: flex; flex-direction: column; min-width: 0; }
+.t, .fam { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fam { font-size: 0.75rem; color: var(--muted); }
 </style>
