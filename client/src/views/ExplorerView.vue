@@ -6,6 +6,7 @@ import Flag from '../components/Flag.vue';
 import { useFilterSync } from '../useFilterSync.js';
 import { useAuthStore } from '../stores/auth.js';
 import FilterBar from '../components/FilterBar.vue';
+import Loader from '../components/Loader.vue';
 
 // Déclarations : une ligne = un flux (pays de l'UE, partenaire, produit, sens) sur un mois.
 // Deux vues : le flux des dernières déclarations (affichage progressif), et la recherche
@@ -53,10 +54,12 @@ const feed = ref([]);
 const buffer = ref([]);
 const livePeriod = ref('');
 const paused = ref(false);
+const liveLoading = ref(false);
 let liveTimer;
 let uid = 0;
 async function startLive() {
   clearTimeout(liveTimer);
+  liveLoading.value = !feed.value.length;
   try {
     const r = await api('/trade/mois', { params: { limit: BUFFER, sort: 'recent' } });
     livePeriod.value = r.window?.to || '';
@@ -66,7 +69,7 @@ async function startLive() {
     feed.value = rows.splice(0, 15);
     buffer.value = rows;
     tick();
-  } catch (e) { error.value = e.message; }
+  } catch (e) { error.value = e.message; } finally { liveLoading.value = false; }
 }
 function tick() {
   liveTimer = setTimeout(() => {
@@ -109,7 +112,8 @@ const windowText = computed(() => {
         <div><h2>Déclarations de {{ livePeriod ? periodLabel(livePeriod) : '…' }}</h2><p>Le mois le plus récent de nos données · {{ buffer.length }} déclarations à venir</p></div>
         <button class="btn btn-sm" @click="paused = !paused">{{ paused ? '▶ Reprendre' : '❚❚ Pause' }}</button>
       </div>
-      <div class="table-wrap">
+      <Loader v-if="liveLoading" text="Chargement des dernières déclarations…" />
+      <div v-else class="table-wrap">
         <table class="feed">
           <thead><tr><th>Mois</th><th>Sens</th><th>Pays de l'UE</th><th>Partenaire</th><th>Produit</th><th class="num">Valeur</th><th class="num">Volume</th><th class="num">Prix</th></tr></thead>
           <TransitionGroup tag="tbody" name="row">
@@ -133,7 +137,8 @@ const windowText = computed(() => {
       <section class="card" :class="{ loading }">
         <div class="card-head">
           <div>
-            <h2>{{ new Intl.NumberFormat('fr-FR').format(result.total) }}{{ result.capped ? '+' : '' }} déclarations</h2>
+            <h2 v-if="loading && !result.rows.length">Déclarations</h2>
+            <h2 v-else>{{ new Intl.NumberFormat('fr-FR').format(result.total) }}{{ result.capped ? '+' : '' }} déclarations</h2>
             <p>{{ windowText }}<span v-if="result.window?.kind !== 'product'"> · {{ result.window?.kind === 'country' ? 'avec seulement des pays, la recherche porte sur 12 mois au plus' : 'sans filtre, la recherche porte sur 3 mois au plus' }} : choisissez un produit pour tout l'historique</span></p>
           </div>
           <div class="row">
@@ -160,7 +165,8 @@ const windowText = computed(() => {
             </tbody>
           </table>
         </div>
-        <p v-if="!loading && !result.rows.length" class="empty">Aucune déclaration pour ces critères.</p>
+        <Loader v-if="loading && !result.rows.length" text="Recherche des déclarations…" />
+        <p v-else-if="!loading && !result.rows.length" class="empty">Aucune déclaration pour ces critères.</p>
         <div v-if="result.pages > 1" class="pager">
           <button class="btn btn-sm" :disabled="page <= 1" @click="go(page - 1)">‹ Précédent</button>
           <span class="hint">Page {{ page }} / {{ result.pages }}</span>
@@ -183,5 +189,4 @@ const windowText = computed(() => {
 .row-enter-active { transition: opacity 0.4s, transform 0.4s; }
 .row-leave-active { display: none; }
 .pager { display: flex; gap: 12px; justify-content: center; align-items: center; margin-top: 12px; }
-.loading { opacity: 0.6; }
 </style>

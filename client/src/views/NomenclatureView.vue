@@ -1,4 +1,5 @@
 <script setup>
+import Loader from '../components/Loader.vue';
 import { onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { api } from '../api.js';
@@ -28,6 +29,7 @@ const pick = (p) => p?.code && router.push(`/produits/${p.code}`);
       <label class="field">Rechercher un produit<NcSearch v-model="search" placeholder="Ex. vin mousseux, saumon fumé, smartphones, 8517…" @select="pick" /></label>
     </div>
     <p v-if="error" class="error">{{ error }}</p>
+    <Loader v-if="!tree.length && !error" text="Chargement de la nomenclature…" />
     <section v-for="s in tree" :key="s.code" class="section">
       <h2><span class="roman">{{ s.code }}</span> {{ s.label }}</h2>
       <div class="chapters">

@@ -1,4 +1,5 @@
 <script setup>
+import Loader from '../components/Loader.vue';
 import { computed, ref, watch } from 'vue';
 import { api } from '../api.js';
 import { ncCode } from '../format.js';
@@ -69,6 +70,7 @@ const codes = computed(() => (node.value?.level === 6 ? [...node.value.children]
         </div>
       </section>
     </template>
+    <Loader v-else-if="!error" text="Chargement…" />
   </div>
 </template>
 

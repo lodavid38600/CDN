@@ -1,6 +1,6 @@
 import { TradeFlow } from '../models/TradeFlow.js';
 import { getDataVersion } from './dataVersion.js';
-import { cubeModel, cubesReady } from './cubes.js';
+import { cubeModel, cubesUsable, cubeBuiltVersion } from './cubes.js';
 
 // Première et dernière période (mois) disponibles par collection, recalculées à chaque
 // nouvelle version des données.
@@ -37,8 +37,8 @@ export async function getDataRange(Model = TradeFlow) {
   const { version } = await getDataVersion();
   const world = Model.modelName === 'WorldFlow';
   // Lignes UE : la table de synthèse par chapitre (quelques centaines de lignes) suffit
-  const useCube = !world && (await cubesReady());
-  const k = `${Model.modelName}${useCube ? ':cube' : ''}`;
+  const useCube = !world && (await cubesUsable());
+  const k = `${Model.modelName}${useCube ? `:cube${await cubeBuiltVersion()}` : ''}`;
   const hit = cache.get(k);
   if (hit && hit.version === version) return hit.range;
   let range;

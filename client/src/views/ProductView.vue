@@ -5,6 +5,8 @@ import { api } from '../api.js';
 import { eur, tonnes, ncCode, perKg, percent, sharePct, rangeLabel, integer } from '../format.js';
 import { useMetaStore } from '../stores/meta.js';
 import { useReportsStore } from '../stores/reports.js';
+import { useAuthStore } from '../stores/auth.js';
+import { useDashboardStore } from '../stores/dashboard.js';
 import { trendSpec, rankSpec, seasonalitySpec, unitPriceSpec, hbarHeight, priceBoxSpec } from '../lib/specs.js';
 import { flowKpis } from '../lib/kpis.js';
 import MeasureSwitch from '../components/MeasureSwitch.vue';
@@ -24,6 +26,7 @@ import PeriodTable from '../components/PeriodTable.vue';
 import PriceAnalysis from '../components/PriceAnalysis.vue';
 import WorldMarket from '../components/WorldMarket.vue';
 import SectionNav from '../components/SectionNav.vue';
+import Loader from '../components/Loader.vue';
 import { bestGranularity, granularities, GRANULARITY_WORD } from '../lib/granularity.js';
 
 // Fiche complète d'un code NC8, toutes les données sur une seule page : indicateurs, valeurs,
@@ -55,6 +58,8 @@ const reporters = ref([]);
 const matrix = ref(null);
 const error = ref('');
 const loading = ref(false);
+const auth = useAuthStore();
+const dashboard = useDashboardStore();
 const drawer = ref('');
 const mapRef = ref(null);
 
@@ -69,6 +74,15 @@ const granularity = ref('month');
 const chartKind = ref('line');
 const withForecast = ref(true);
 const mapMode = ref('partner');
+/** Graphique d'évolution du produit avec les filtres en cours, vers le tableau de bord. */
+function pinTrend() {
+  const l = local.value;
+  const fixed = Boolean(l.from && l.to);
+  dashboard.openBuilder({
+    type: 'trend', title: `${ncCode(props.code)} — ${product.value?.description || ''}`.slice(0, 160), mode: fixed ? 'fixed' : 'live', months: 24, from: l.from, to: l.to,
+    params: { product: props.code, reporters: [...l.reporters], partners: [...l.partners], flow: l.flow, measure: measure.value, granularity: granularity.value },
+  });
+}
 const raw = ref(false); // codes tels que déclarés (sans reconstitution de la nomenclature)
 const prices = ref(null);
 
@@ -268,6 +282,7 @@ async function addMapToReport() {
         <div class="page-actions">
           <RouterLink class="btn" :to="{ path: '/comparateur', query: { codes: code } }">⇄ Comparer avec d'autres produits</RouterLink>
           <RouterLink class="btn" :to="{ path: '/declarations', query: { product: code, periodFrom: local.from || undefined, periodTo: local.to || undefined } }">Déclarations mois par mois</RouterLink>
+          <button v-if="auth.has('dashboard')" class="btn" :disabled="!summary" @click="pinTrend">＋ Au tableau de bord</button>
           <button class="btn btn-primary" :disabled="!summary" @click="generateReport">📄 Générer un rapport</button>
         </div>
       </div>
@@ -293,6 +308,7 @@ async function addMapToReport() {
       </div>
 
       <div id="synthese" class="anchor" />
+      <Loader v-if="!summary && loading" class="card" text="Chargement des chiffres du produit…" />
       <div v-if="summary" class="kpis" :class="{ loading }">
         <KpiCard v-for="k in kpis" :key="k.dot" v-bind="k" :spark="monthly.slice(-24).map((r) => r[`${k.dot}${mk}`])" :spark-color="`var(--${k.dot})`" />
         <KpiCard label="Solde commercial" :value="`${summary.balanceEur >= 0 ? '+' : ''}${eur(summary.balanceEur)}`" :sub="`Couverture ${summary.importEur ? sharePct(summary.exportEur / summary.importEur) : '—'}`" />
@@ -385,6 +401,7 @@ async function addMapToReport() {
       <h2 id="monde" class="sec-title">Marché mondial · tous les pays du monde</h2>
       <WorldMarket :code="code" :from="local.from" :to="local.to" :measure="measure" :flow="local.flow" />
     </template>
+    <Loader v-else-if="!error" text="Chargement de la fiche produit…" />
     <PeriodDrawer :period="drawer" :params="{ product: code, reporters: local.reporters, partners: local.partners }" :context="`NC ${ncCode(code)}`" @close="drawer = ''" />
   </div>
 </template>

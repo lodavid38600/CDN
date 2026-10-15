@@ -8,7 +8,7 @@ import { TradeFlow } from '../models/TradeFlow.js';
 import { WorldFlow } from '../models/WorldFlow.js';
 import { buildMatch, valueStages } from './filters.js';
 import { getNcGraph } from './ncContext.js';
-import { CUBES, CUBE_ORDER, cubeModel, cubesReady } from './cubes.js';
+import { CUBES, CUBE_ORDER, cubeModel, cubesUsable } from './cubes.js';
 
 export const SOURCES = { eu: { Model: TradeFlow, level: 8 }, world: { Model: WorldFlow, level: 6 } };
 
@@ -121,7 +121,7 @@ async function pickCube(match, dims, code, level) {
       // Un code supprimé est servi par sa continuation dans les lignes détaillées
       if (code.length === level && (await getNcGraph(level)).isObsolete(code)) return null;
     } else if (code && (code.length !== 2 || !CUBES[cube].fields.has('chapter'))) continue;
-    return (await cubesReady()) ? cube : null;
+    return (await cubesUsable()) ? cube : null;
   }
   return null;
 }

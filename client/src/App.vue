@@ -4,10 +4,11 @@ import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from './stores/auth.js';
 import { useUiStore } from './stores/ui.js';
 import AddToReportModal from './components/AddToReportModal.vue';
+import WidgetBuilder from './components/WidgetBuilder.vue';
 import Modal from './components/Modal.vue';
 import { useMetaStore } from './stores/meta.js';
 import { periodLabel } from './format.js';
-import { api } from './api.js';
+import { api, pending } from './api.js';
 
 const auth = useAuthStore();
 const ui = useUiStore();
@@ -43,6 +44,14 @@ async function loadHome() {
   clearTimeout(prepTimer);
   if (preparing.value) prepTimer = setTimeout(loadHome, 20000); // jusqu'à la fin de la préparation
 }
+// Barre de chargement : n'apparaît que si une requête dure plus de 250 ms (pas de clignotement)
+const busy = ref(false);
+let busyTimer;
+watch(pending, (n) => {
+  clearTimeout(busyTimer);
+  if (n > 0) busyTimer = setTimeout(() => { busy.value = true; }, 250);
+  else busy.value = false;
+});
 const unread = ref({ tickets: 0, chat: 0 });
 let timer;
 async function refresh() {
@@ -105,6 +114,7 @@ const groups = computed(() => {
       title: 'Analyse',
       links: [
         { to: '/', label: 'Accueil', icon: I.home, show: true },
+        { to: '/tableau-de-bord', label: 'Mon tableau de bord', hint: 'Vos graphiques enregistrés', icon: I.dash, show: f('dashboard') },
         { to: '/nomenclature', label: 'Produits', hint: 'Rechercher un produit, parcourir les codes NC', icon: I.grid, show: f('explore') },
         { to: '/pays', label: 'Pays partenaires', hint: 'Fiche de chaque pays', icon: I.globe, show: f('explore') },
         { to: '/comparateur', label: 'Comparer des produits', hint: 'Plusieurs codes NC8 côte à côte', icon: I.compare, show: f('compare') },
@@ -124,7 +134,7 @@ const groups = computed(() => {
     {
       title: 'Équipe',
       links: [
-        { to: '/equipe', label: 'Tableau de bord', icon: I.dash, show: auth.isStaff, exact: true },
+        { to: '/equipe', label: "Vue d'ensemble", icon: I.dash, show: auth.isStaff, exact: true },
         { to: '/equipe/societes', label: 'Sociétés', icon: I.company, show: c('companies.manage') },
         { to: '/equipe/utilisateurs', label: 'Utilisateurs', icon: I.users, show: c('users.manage') },
         { to: '/equipe/tickets', label: 'Tickets', icon: I.ticket, show: c('support.manage'), badge: auth.isStaff ? unread.value.tickets : 0 },
@@ -160,6 +170,7 @@ async function changePassword() {
 </script>
 
 <template>
+  <div v-if="busy" class="topbar-progress" role="progressbar" aria-label="Chargement en cours" />
   <div v-if="shell" class="layout">
     <header class="topbar">
       <button class="btn btn-sm burger" aria-label="Menu" @click="menuOpen = !menuOpen">☰</button>
@@ -200,6 +211,7 @@ async function changePassword() {
       <RouterView />
     </main>
     <AddToReportModal />
+    <WidgetBuilder />
     <Modal v-if="auth.user?.mustChangePassword" title="Choisissez votre mot de passe" @close="() => {}">
       <p class="secondary" style="margin-bottom: 12px">Vous vous êtes connecté avec un mot de passe provisoire. Choisissez le vôtre pour continuer.</p>
       <form class="pwform" @submit.prevent="changePassword">

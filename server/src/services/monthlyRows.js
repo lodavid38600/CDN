@@ -2,7 +2,7 @@
 // mois donné, la déclaration la plus récente d'abord.
 import mongoose from 'mongoose';
 import { periodKey } from './filters.js';
-import { LATEST, LATEST_ROWS, latestInfo } from './cubes.js';
+import { LATEST, latestInfo, recentKey } from './cubes.js';
 
 // Fenêtre parcourue : avec un produit, tout l'historique ; avec seulement des pays, 3 derniers mois
 // par défaut et 12 au plus ; sans filtre, le dernier mois par défaut et 3 au plus.
@@ -79,27 +79,64 @@ const labels = [
   { $project: { p: 0 } },
 ];
 
+const ym = (p) => p.y * 100 + p.m;
+
+/**
+ * La page demandée peut-elle être lue dans la table des déclarations récentes ? Celle-ci garde,
+ * pour chaque mois et chaque sens, les N déclarations les plus importantes (au global, par pays
+ * de l'UE, par partenaire) et leur nombre exact : on vérifie que la page tombe dans cette partie.
+ */
+function recentPlan(info, f, window, sort, dir, skip, limit) {
+  if (!info?.counts || dir !== -1 || !['recent', 'value'].includes(sort)) return null;
+  if (f.product || f.chapters || f.sections || f.hs6 || f.sources) return null;
+  const r = f.reporters || [];
+  const p = f.partners || [];
+  let g = 'all';
+  let c = null;
+  if (r.length === 1 && !p.length) { g = 'reporter'; [c] = r; } else if (p.length === 1 && !r.length) { g = 'partner'; [c] = p; } else if (r.length || p.length) return null;
+  const periods = [];
+  for (let k = window.to; ym(k) >= ym(window.from); k = shift(k, -1)) periods.push(ym(k));
+  const covered = new Set(info.periods.map((x) => Number(x.replace('-', ''))));
+  if (!periods.every((k) => covered.has(k))) return null;
+  const n = info.top[g];
+  const flows = f.flow ? [f.flow] : ['import', 'export'];
+  let total = 0;
+  let available = 0; // nombre de premières lignes exactes dans l'ordre demandé
+  let open = true;
+  for (const k of periods) {
+    const counts = flows.map((fl) => info.counts[recentKey(k, fl, g, c)] || 0);
+    const sum = counts.reduce((a, b) => a + b, 0);
+    total += sum;
+    if (sort === 'recent' && open) {
+      if (counts.every((x) => x <= n)) available += sum;
+      else { available += n; open = false; }
+    }
+  }
+  if (sort === 'value') available = periods.every((k) => flows.every((fl) => (info.counts[recentKey(k, fl, g, c)] || 0) <= n)) ? total : n;
+  if (available < total && skip + limit > available) return null;
+  const match = { period: { $gte: ym(window.from), $lte: ym(window.to) } };
+  if (f.flow) match.flow = f.flow;
+  if (g !== 'all') match[g] = c;
+  return { match, total };
+}
+
 /** Page de lignes mensuelles. */
 export async function monthlyPage({ f, scope, window, sort = 'recent', order = 'desc', skip = 0, limit = 50, cap = 100000 }) {
   const dir = order === 'asc' ? 1 : -1;
   const sortSpec = (SORTS[sort] || SORTS.recent)(dir);
-  // Dernier mois sans filtre : table préparée à l'avance (instantané)
-  const latest = await latestInfo();
-  const onlyLatest = latest && !window.narrowed && !f.sections && !f.chapters && periodKey(window.from) === periodKey(window.to)
-    && `${window.to.y}-${String(window.to.m).padStart(2, '0')}` === latest.period && ['recent', 'value'].includes(sort) && dir === -1 && skip + limit <= LATEST_ROWS;
-  if (onlyLatest) {
-    const q = f.flow ? { flow: f.flow } : {};
+  // Mois récents : table préparée à l'avance (instantané)
+  const plan = recentPlan(await latestInfo(), f, window, sort, dir, skip, limit);
+  if (plan) {
     const rows = await mongoose.connection.collection(LATEST).aggregate([
-      { $match: q }, { $sort: { valueEur: -1, product: 1, reporter: 1, partner: 1, flow: 1 } }, { $skip: skip }, { $limit: limit },
+      { $match: plan.match }, { $sort: sortSpec }, { $skip: skip }, { $limit: limit },
       { $set: { unitPrice: { $cond: [{ $gt: ['$quantityKg', 0] }, { $divide: ['$valueEur', '$quantityKg'] }, null] }, share: 1 } }, ...labels, { $project: { _id: 0 } },
     ]).toArray();
-    const total = f.flow ? latest.byFlow?.[f.flow] || 0 : latest.count;
-    return { rows, total: Math.min(total, cap), capped: total > cap, source: 'latest' };
+    return { rows, total: cap ? Math.min(plan.total, cap) : plan.total, capped: Boolean(cap) && plan.total > cap, source: 'latest' };
   }
   const base = monthlyPipeline(scope, window);
   const [count, rows] = await Promise.all([
-    scope.Model.aggregate([...base, { $limit: cap + 1 }, { $count: 'n' }]).allowDiskUse(true).then((r) => r[0]?.n ?? 0),
+    cap ? scope.Model.aggregate([...base, { $limit: cap + 1 }, { $count: 'n' }]).allowDiskUse(true).then((r) => r[0]?.n ?? 0) : 0,
     scope.Model.aggregate([...base, { $sort: sortSpec }, { $skip: skip }, { $limit: limit }, ...labels]).allowDiskUse(true),
   ]);
-  return { rows, total: Math.min(count, cap), capped: count > cap, source: 'detail' };
+  return { rows, total: Math.min(count, cap || Infinity), capped: Boolean(cap) && count > cap, source: 'detail' };
 }

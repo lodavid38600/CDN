@@ -1,4 +1,5 @@
 <script setup>
+import Loader from '../components/Loader.vue';
 import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { api } from '../api.js';
@@ -62,6 +63,7 @@ function pick(p) {
     </div>
     <p v-if="error" class="error">{{ error }}</p>
 
+    <Loader v-if="!home && !error" text="Chargement de l'accueil…" />
     <div v-if="home" class="grid grid-3" style="margin-top: 16px">
       <section class="card">
         <div class="card-head"><div><h2>Actualités</h2><p>Les nouveautés de l'outil</p></div></div>

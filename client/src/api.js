@@ -1,4 +1,6 @@
 // Client HTTP minimal : ajoute le jeton JWT et convertit les erreurs de l'API.
+import { ref } from 'vue';
+
 const TOKEN_KEY = 'douane.token';
 
 export const tokenStore = {
@@ -20,7 +22,19 @@ export function toQuery(params = {}) {
   return s ? `?${s}` : '';
 }
 
-export async function api(path, { method = 'GET', body, params, raw = false } = {}) {
+/** Nombre de requêtes en cours (barre de chargement en haut de page). */
+export const pending = ref(0);
+
+export async function api(path, opts = {}) {
+  pending.value += 1;
+  try {
+    return await request(path, opts);
+  } finally {
+    pending.value -= 1;
+  }
+}
+
+async function request(path, { method = 'GET', body, params, raw = false } = {}) {
   const headers = {};
   const token = tokenStore.get();
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -34,5 +48,9 @@ export async function api(path, { method = 'GET', body, params, raw = false } = 
     const data = await res.json().catch(() => ({}));
     throw new Error(data.error || `Erreur ${res.status}`);
   }
-  return raw ? res : res.json();
+  if (raw) return res;
+  // 204 (suppression…) : pas de corps à lire
+  if (res.status === 204) return null;
+  const text = await res.text();
+  return text ? JSON.parse(text) : null;
 }

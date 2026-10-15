@@ -18,14 +18,15 @@ export const FEATURES = {
   forecast: 'Prévisions',
   world: 'Marché mondial (pays hors Eurostat)',
   reports: 'Rapports PDF et PowerPoint',
+  dashboard: 'Tableau de bord personnalisé',
   export: 'Export CSV',
   api: 'Accès API',
 };
 
 export const PLANS = {
-  essai: { label: 'Essai', monthly: 0, seats: 2, exportLimit: 1000, days: 14, features: ['explore', 'prices', 'compare', 'reports'] },
-  essentiel: { label: 'Essentiel', monthly: 49, seats: 3, exportLimit: 10000, features: ['explore', 'prices', 'compare', 'reports', 'export'] },
-  pro: { label: 'Pro', monthly: 149, seats: 10, exportLimit: 100000, features: ['explore', 'prices', 'compare', 'forecast', 'world', 'reports', 'export'] },
+  essai: { label: 'Essai', monthly: 0, seats: 2, exportLimit: 1000, days: 14, features: ['explore', 'prices', 'compare', 'reports', 'dashboard'] },
+  essentiel: { label: 'Essentiel', monthly: 49, seats: 3, exportLimit: 10000, features: ['explore', 'prices', 'compare', 'reports', 'dashboard', 'export'] },
+  pro: { label: 'Pro', monthly: 149, seats: 10, exportLimit: 100000, features: ['explore', 'prices', 'compare', 'forecast', 'world', 'reports', 'dashboard', 'export'] },
   entreprise: { label: 'Entreprise', monthly: 490, seats: 50, exportLimit: 500000, features: Object.keys(FEATURES) },
 };
 

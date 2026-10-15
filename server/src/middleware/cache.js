@@ -1,4 +1,5 @@
 import { getDataVersion } from '../services/dataVersion.js';
+import { cubeBuiltVersion } from '../services/cubes.js';
 
 // Cache mémoire des réponses statistiques (données identiques pour tous les utilisateurs).
 // La clé inclut la version des données : un import ou une synchronisation, même lancé par
@@ -16,7 +17,9 @@ export function statsCache(ttlMs = 60 * 60 * 1000) {
     if (req.method !== 'GET') return next();
     let version;
     try {
-      ({ version } = await getDataVersion());
+      // Tables de synthèse reconstruites : les réponses calculées avec les anciennes sont périmées
+      const [{ version: v }, built] = await Promise.all([getDataVersion(), cubeBuiltVersion()]);
+      version = `${v}:${built}`;
     } catch {
       return next(); // base momentanément indisponible : pas de cache plutôt qu'une erreur
     }

@@ -429,7 +429,7 @@ it('mise à jour : une étape en échec n\'empêche pas les autres, le journal l
   }
 });
 
-it('tables de synthèse : résultats identiques aux lignes détaillées, jamais utilisées périmées', async () => {
+it('tables de synthèse : résultats identiques aux lignes détaillées, anciennes tables servies pendant la reconstruction', async () => {
   await bumpDataVersion({ test: 'cubes' });
   const URLS = [
     '/api/stats/summary', '/api/stats/summary?reporters=FR', '/api/stats/summary?periodFrom=2022-03&periodTo=2023-02',
@@ -437,6 +437,7 @@ it('tables de synthèse : résultats identiques aux lignes détaillées, jamais 
     '/api/stats/top?dimension=partner', '/api/stats/top?dimension=reporter&flow=import', '/api/stats/top?dimension=section',
     '/api/stats/top?dimension=chapter&limit=100', '/api/stats/top?dimension=product&limit=50', '/api/stats/top?dimension=hs6',
     '/api/stats/top?dimension=partner&product=85', '/api/stats/top?dimension=product&product=8517', '/api/stats/summary?product=85171300',
+    '/api/stats/top?dimension=chapter&partners=US', '/api/stats/top?dimension=chapter&reporters=FR&flow=import',
     '/api/stats/sparklines?dimension=chapter', '/api/stats/matrix?size=5', '/api/stats/forecast?granularity=month&horizon=6',
     '/api/meta', // période couverte (premier / dernier mois renseigné)
   ];
@@ -460,6 +461,8 @@ it('tables de synthèse : résultats identiques aux lignes détaillées, jamais 
   const pick = async (q, dims) => (await buildScope(parseFilters(q), { dims })).cube || 'détail';
   assert.equal(await pick({}, []), 'chapter');
   assert.equal(await pick({ reporters: 'FR' }, ['partner']), 'country');
+  assert.equal(await pick({ partners: 'US' }, ['chapter']), 'partnerChapter', 'fiche pays : chapitres sans la grande table');
+  assert.equal(await pick({ reporters: 'FR' }, ['chapter']), 'reporterChapter');
   assert.equal(await pick({}, ['product']), 'product');
   assert.equal(await pick({ product: '85171300' }, []), 'product');
   assert.equal(await pick({ product: '85171200' }, []), 'détail', 'code supprimé : continuation sur les lignes détaillées');
@@ -469,13 +472,22 @@ it('tables de synthèse : résultats identiques aux lignes détaillées, jamais 
   const norm = (x) => JSON.parse(JSON.stringify(x, (k, v) => (typeof v === 'number' ? Math.round(v * 1000) / 1000 : v)));
   URLS.forEach((u, i) => assert.deepEqual(norm(fromCubes[i]), norm(detailed[i]), u));
 
-  // Nouvelle donnée sans reconstruction : les tables sont ignorées, le résultat reste exact
+  // Nouvelle donnée, tables pas encore reconstruites : les anciennes tables restent servies
+  // (pages rapides pendant la préparation), puis la reconstruction fait apparaître la donnée.
   const before = (await request(app).get('/api/stats/summary').set(auth())).body.exportEur;
   await insertFlows([row('85171300', 2023, 'export', 1, { reporter: 'IT', partner: 'NO', n: 1 })]);
   await bumpDataVersion({ test: 'cubes-stale' });
   await new Promise((r) => setTimeout(r, 5100)); // lecture de l'état des tables : au plus toutes les 5 s
   clearStatsCache();
+  assert.equal(await cubesReady(), false);
+  assert.equal((await request(app).get('/api/stats/summary').set(auth())).body.exportEur, before, 'anciennes tables pendant la préparation');
+  // Sans tables périmées : lignes détaillées, résultat exact
+  process.env.STATS_STALE_CUBES = 'false';
+  clearStatsCache();
   assert.equal((await request(app).get('/api/stats/summary').set(auth())).body.exportEur, before + 1);
+  delete process.env.STATS_STALE_CUBES;
+  await rebuildCubes();
+  assert.equal((await request(app).get('/api/stats/summary').set(auth())).body.exportEur, before + 1, 'cache invalidé à la fin de la reconstruction');
 });
 
 it('lignes mensuelles : dernier mois par défaut, plus récentes d\'abord, table préparée identique au calcul', async () => {
@@ -501,6 +513,26 @@ it('lignes mensuelles : dernier mois par défaut, plus récentes d\'abord, table
   assert.equal(wide.window.clamped, true);
   const csv = await request(app).get('/api/trade/mois.csv?product=85171300&reporters=FR').set(auth()).expect(200);
   assert.match(csv.text.split('\n')[1], /^\d{4}-\d{2};/);
+});
+
+it('déclarations par pays : table des mois récents identique au calcul détaillé', async () => {
+  await rebuildCubes();
+  const key = (r) => `${r.period}|${r.reporter}|${r.partner}|${r.product}|${r.flow}|${r.valueEur}`;
+  const cases = ['reporters=FR', 'partners=US', 'reporters=DE&flow=import', '', 'flow=export'];
+  for (const q of cases) {
+    for (const sort of ['recent', 'value']) {
+      for (const page of [1, 2]) {
+        const u = `/api/trade/mois?${q}&sort=${sort}&limit=7&page=${page}`;
+        clearStatsCache();
+        const fast = (await request(app).get(u).set(auth()).expect(200)).body;
+        process.env.STATS_CUBES = 'false';
+        const slow = (await request(app).get(u).set(auth()).expect(200)).body;
+        delete process.env.STATS_CUBES;
+        assert.deepEqual(fast.rows.map(key), slow.rows.map(key), u);
+        assert.equal(fast.total, slow.total, u);
+      }
+    }
+  }
 });
 
 it('verrou : libéré si le processus s\'arrête, jamais bloquant des heures', async () => {

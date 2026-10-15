@@ -22,6 +22,7 @@ const routes = [
   { path: '/pays', name: 'countries', component: v('MapView'), meta: { feature: 'explore' } },
   { path: '/comparateur', name: 'compare', component: v('CompareView'), meta: { feature: 'compare' } },
   { path: '/declarations', name: 'explorer', component: v('ExplorerView'), meta: { feature: 'explore' } },
+  { path: '/tableau-de-bord', name: 'dashboard', component: v('DashboardView'), meta: { feature: 'dashboard' } },
   { path: '/rapports', name: 'reports', component: v('ReportsView'), meta: { feature: 'reports' } },
   { path: '/rapports/:id', name: 'report', component: v('ReportEditorView'), props: true, meta: { bare: true, feature: 'reports' } },
   // Espace client

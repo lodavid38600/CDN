@@ -87,8 +87,9 @@ router.get('/summary', async (req, res) => {
     totals(cur, opts),
     custom ? null : totals(ref, opts),
     totals(prev, opts),
-    // Comptages : codes NC (table par produit) et pays (table par pays) séparément
-    Promise.all([
+    // Comptages : codes NC (table par produit) et pays (table par pays) séparément.
+    // counts=0 : inutiles pour l'appelant (fiche pays), on évite de relire les lignes détaillées.
+    req.query.counts === '0' ? [{}] : Promise.all([
       aggregate(cur, opts, (sc) => [
         { $project: { tc: { $ifNull: ['$tc', ['$product']] } } }, { $unwind: '$tc' },
         // Un ancien code réparti entre plusieurs codes actuels ne compte que pour ceux du périmètre

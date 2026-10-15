@@ -198,3 +198,23 @@ it('anciens comptes (avant les sociétés) : migration automatique', async () =>
 it('limite des connexions : la session elle-même n\'est jamais bloquée', async () => {
   for (let i = 0; i < 60; i++) await request(app).get('/api/auth/me').set(as('ownerA')).expect(200);
 });
+
+it('tableau de bord : personnel, ordre et suppression enregistrés, filtres validés', async () => {
+  const w = (title, extra = {}) => ({ type: 'trend', title, params: { product: '22041011', reporters: ['FR'], flow: 'export', measure: 'quantity' }, mode: 'live', months: 24, ...extra });
+  const a = (await request(app).post('/api/tableau-de-bord/widgets').set(as('ownerA')).send(w('Vins')).expect(201)).body;
+  const b = (await request(app).post('/api/tableau-de-bord/widgets').set(as('ownerA')).send(w('Figé', { mode: 'fixed', from: '2024-01', to: '2024-12', snapshot: { rows: [{ period: '2024-01', exportEur: 5 }] } })).expect(201)).body;
+  assert.equal(a.params.measure, 'quantity');
+  assert.equal(b.snapshot.rows[0].exportEur, 5);
+  assert.ok(b.frozenAt);
+  // Réorganisation puis suppression
+  await request(app).put('/api/tableau-de-bord').set(as('ownerA')).send({ widgets: [b, a] }).expect(200);
+  assert.deepEqual((await request(app).get('/api/tableau-de-bord').set(as('ownerA'))).body.widgets.map((x) => x.title), ['Figé', 'Vins']);
+  await request(app).delete(`/api/tableau-de-bord/widgets/${b.id}`).set(as('ownerA')).expect(204);
+  assert.deepEqual((await request(app).get('/api/tableau-de-bord').set(as('ownerA'))).body.widgets.map((x) => x.title), ['Vins']);
+  // Chacun son tableau de bord
+  assert.equal((await request(app).get('/api/tableau-de-bord').set(as('ownerB'))).body.widgets.length, 0);
+  // Filtres invalides refusés
+  await request(app).post('/api/tableau-de-bord/widgets').set(as('ownerA')).send({ type: 'carte' }).expect(400);
+  await request(app).post('/api/tableau-de-bord/widgets').set(as('ownerA')).send(w('x', { mode: 'fixed', from: '2024-12', to: '2024-01' })).expect(400);
+  await request(app).post('/api/tableau-de-bord/widgets').set(as('ownerA')).send(w('x', { params: { product: '22$where' } })).expect(400);
+});

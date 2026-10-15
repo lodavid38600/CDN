@@ -18,6 +18,7 @@ entre les **27 pays de l'UE** et les **pays hors UE**, code NC par code NC (nome
 | **Pays partenaires** | Liste des pays et fiche de chaque pays |
 | **Comparer des produits** | 2 à 4 codes NC8 : valeur, volume, prix moyen et médian, évolution sur un an, principaux pays, évolution superposée (base 100 possible), marchés communs |
 | **Déclarations** | Une ligne = un flux sur un mois, la plus récente d'abord ; flux des dernières déclarations (500 lignes qui apparaissent progressivement) ; recherche, tri, export CSV |
+| **Tableau de bord** | Graphiques personnels avec leurs filtres : suivis (période glissante, mis à jour avec chaque import) ou figés (chiffres gardés en mémoire) ; réorganisables par glisser-déposer |
 | **Rapports** | Générés en un clic, éditables, mode présentation, export **PDF** et **PowerPoint** |
 | **Assistance** | Demandes (tickets) avec suivi, messagerie instantanée avec l'équipe |
 | **Ma société** | Abonnement et fonctionnalités incluses, coordonnées, membres (gérés par les responsables) |
@@ -69,15 +70,23 @@ Les anciennes adresses `/prix?product=…` et `/monde?product=…` redirigent ve
 ## Rapidité sur des millions de lignes
 
 Les vues générales ne parcourent jamais toutes les lignes détaillées : des **tables de synthèse**
-(par chapitre, par pays déclarant, par partenaire, par pays × chapitre, par code NC) sont reconstruites
-automatiquement après chaque import, et au démarrage du serveur si elles sont absentes ou périmées.
-Chaque requête lit la plus petite table capable d'y répondre exactement ; une table qui ne correspond
-pas à la version des données en cours n'est jamais utilisée (on lit alors les lignes détaillées).
-Un test vérifie que les résultats sont identiques avec et sans ces tables.
+(par chapitre, par pays déclarant, par partenaire, pays × chapitre, par pays × partenaire × chapitre,
+par code NC) sont reconstruites automatiquement après chaque import, et au démarrage du serveur si
+elles sont absentes ou périmées. Chaque requête lit la plus petite table capable d'y répondre exactement.
+Pendant une reconstruction, les tables précédentes restent servies (pages rapides, chiffres du dernier
+import visibles à la fin de la préparation, bandeau « Préparation des données en cours ») ;
+`STATS_STALE_CUBES=false` impose à la place la lecture des lignes détaillées. Les calculs sont
+lancés en parallèle par année et par sens (`STATS_BUILD_PARALLEL`, 4 par défaut).
 
-Mesuré sur 4,4 millions de lignes (2 ans) : vue d'ensemble 92 s → 0,2 s, grille des chapitres
-41 s → < 0,1 s, carte 7,8 s → < 0,1 s, lignes détaillées 3,5 s → 0,02 s. La reconstruction prend
-environ 3 minutes pour ce volume. Diagnostic : `STATS_CUBES=false` désactive les tables.
+**Déclarations récentes** : pour les 3 derniers mois, les déclarations les plus importantes de chaque
+mois et de chaque sens sont préparées au global (5 000), par pays de l'UE (1 500) et par partenaire
+(500), avec leur nombre exact : le flux en direct et « les déclarations d'un pays » s'affichent
+instantanément. Au-delà (pages lointaines, période plus ancienne, plusieurs pays), lecture détaillée.
+
+Mesuré sur 20 millions de lignes (environ 130 millions de déclarations mensuelles, 2 ans, 27 pays UE,
+148 partenaires) : toutes les pages en moins d'une seconde (fiche pays 0,1 s, déclarations d'un pays
+0,2 à 0,5 s, flux en direct 0,6 s), sauf une recherche par pays sur 12 mois (≈ 7 s). Reconstruction
+complète des tables : 9 min (16 min base froide). Diagnostic : `STATS_CUBES=false` désactive les tables.
 
 ## Évolution de la nomenclature : automatique
 
@@ -287,6 +296,7 @@ Toutes les routes (sauf `/api/auth/*` et `/api/health`) exigent `Authorization: 
 | GET | `/api/trade/mois`, `/api/trade/mois.csv` | Déclarations au mois, les plus récentes d'abord ; export CSV (plafond selon l'offre) |
 | GET | `/api/products?q=`, `/api/products/:code` | Recherche ; fiche d'un code NC8 |
 | GET/POST/PUT/DELETE | `/api/reports`, `/api/reports/:id`, `POST /api/reports/:id/blocks` | Rapports de l'utilisateur |
+| GET/PUT, POST/DELETE | `/api/tableau-de-bord`, `/api/tableau-de-bord/widgets[/:id]` | Tableau de bord personnel (ordre, tailles, graphiques suivis ou figés) |
 
 Toutes les routes statistiques acceptent `source=world` (données mondiales SH6) et `nc=brut` (codes tels que déclarés).
 Filtres communs : `periodFrom` / `periodTo` (`AAAA-MM`), ou `yearFrom` / `yearTo` / `year` ;

@@ -1,4 +1,5 @@
 <script setup>
+import Loader from '../components/Loader.vue';
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { api } from '../api.js';
@@ -170,6 +171,7 @@ const countryOpts = computed(() => meta.reporters.map((c) => ({ value: c.code, l
     <p v-if="error" class="error">{{ error }}</p>
     <p v-if="!codes.length" class="empty card">Ajoutez au moins deux produits pour les comparer. Par exemple « vins mousseux » et « vins tranquilles », ou deux variétés de fromage.</p>
 
+    <Loader v-if="codes.length && !items.length && loading" class="card" text="Chargement de la comparaison…" />
     <template v-if="items.length">
       <div class="cards" :class="{ loading }">
         <section v-for="d in items" :key="d.code" class="card prod" :style="{ borderTopColor: `var(--s${d.color})` }">
@@ -238,5 +240,4 @@ h3 { margin: 10px 0 4px; font-size: 0.74rem; text-transform: uppercase; letter-s
 .top li { display: list-item; }
 .top .num { float: right; color: var(--text-2); }
 .toggle { display: inline-flex; gap: 6px; align-items: center; font-size: 0.82rem; color: var(--text-2); }
-.loading { opacity: 0.6; }
 </style>

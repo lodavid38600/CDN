@@ -17,6 +17,7 @@ import tradeRoutes from './routes/trade.js';
 import productRoutes from './routes/products.js';
 import nomenclatureRoutes from './routes/nomenclature.js';
 import reportRoutes from './routes/reports.js';
+import dashboardRoutes from './routes/dashboard.js';
 import adminRoutes from './routes/admin.js';
 import homeRoutes from './routes/home.js';
 import companyRoutes from './routes/company.js';
@@ -41,7 +42,7 @@ export function createApp() {
   app.use(cors({ origin: config.corsOrigin.split(','), credentials: false }));
   // Le routeur des rapports accepte des corps plus volumineux (images) : il gère son propre parseur.
   const smallJson = express.json({ limit: '100kb' });
-  app.use((req, res, next) => (req.path.startsWith('/api/reports') ? next() : smallJson(req, res, next)));
+  app.use((req, res, next) => (req.path.startsWith('/api/reports') || req.path.startsWith('/api/tableau-de-bord') ? next() : smallJson(req, res, next)));
   if (config.env !== 'test') app.use(morgan('dev'));
 
   app.get('/api/health', (req, res) => {
@@ -65,6 +66,7 @@ export function createApp() {
   app.use('/api/products', ...explore, productRoutes);
   app.use('/api/nomenclature', ...explore, nomenclatureRoutes);
   app.use('/api/reports', requireAuth, requireFeature('reports'), reportRoutes);
+  app.use('/api/tableau-de-bord', requireAuth, requireFeature('dashboard'), dashboardRoutes);
   app.use('/api/admin', requireAuth, adminRoutes);
   app.use('/api', (req, res) => res.status(404).json({ error: 'Route inconnue' }));
 

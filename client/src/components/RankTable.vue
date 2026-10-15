@@ -14,6 +14,7 @@ const props = defineProps({
   link: { type: Function, default: null },
   max: { type: Number, default: 0 },
   badges: { type: Object, default: () => ({}) }, // { key: 'texte' } (ex. source des données)
+  selected: { type: String, default: '' }, // ligne mise en évidence (fiche ouverte)
 });
 const emit = defineEmits(['select']);
 const sortBy = ref(null);
@@ -68,7 +69,7 @@ const code = (k) => (props.kind === 'product' || props.kind === 'hs6' ? ncCode(k
         </tr>
       </thead>
       <tbody>
-        <tr v-for="r in sorted" :key="r.key" :class="{ clickable: !link }" @click="!link && emit('select', r)">
+        <tr v-for="r in sorted" :key="r.key" :class="{ clickable: !link, sel: selected === r.key }" @click="!link && emit('select', r)">
           <td class="lbl">
             <component :is="link ? 'RouterLink' : 'span'" :to="link ? link(r) : undefined" class="name">
               <Flag v-if="kind === 'country'" :code="r.key" />
@@ -105,4 +106,5 @@ td.num.down.em, td.num.down { color: var(--bad); }
 th.em { color: var(--text); }
 tr.clickable { cursor: pointer; }
 .badge { font-size: 0.66rem; padding: 0 6px; }
+tr.sel td { background: var(--accent-wash); }
 </style>
