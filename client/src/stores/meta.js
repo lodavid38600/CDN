@@ -3,9 +3,10 @@ import { api } from '../api.js';
 
 // Référentiels : années disponibles, pays, nomenclature (sections / chapitres).
 export const useMetaStore = defineStore('meta', {
-  state: () => ({ years: [], reporters: [], partners: [], sections: [], loaded: false }),
+  state: () => ({ years: [], firstPeriod: null, lastPeriod: null, reporters: [], partners: [], sections: [], loaded: false }),
   getters: {
     countryName: (s) => (code) => [...s.reporters, ...s.partners].find((c) => c.code === code)?.name || code,
+    country: (s) => (code) => [...s.reporters, ...s.partners].find((c) => c.code === code),
     chapters: (s) => s.sections.flatMap((sec) => sec.chapters.map((c) => ({ ...c, section: sec.code }))),
   },
   actions: {

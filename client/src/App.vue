@@ -2,8 +2,11 @@
 import { computed, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from './stores/auth.js';
+import { useUiStore } from './stores/ui.js';
+import AddToReportModal from './components/AddToReportModal.vue';
 
 const auth = useAuthStore();
+const ui = useUiStore();
 const route = useRoute();
 const router = useRouter();
 const menuOpen = ref(false);
@@ -34,12 +37,26 @@ function logout() {
   router.push({ name: 'login' });
 }
 
-const links = [
-  { to: '/', label: 'Tableau de bord', icon: 'M3 13h8V3H3zm0 8h8v-6H3zm10 0h8V11h-8zm0-18v6h8V3z' },
-  { to: '/explorer', label: 'Explorateur', icon: 'M3 5h18v2H3zm0 6h18v2H3zm0 6h18v2H3z' },
-  { to: '/categories', label: 'Catégories NC', icon: 'M4 4h7v7H4zm9 0h7v7h-7zM4 13h7v7H4zm9 0h7v7h-7z' },
-  { to: '/compte', label: 'Mon compte', icon: 'M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10zm0 2c-5 0-9 2.5-9 5v3h18v-3c0-2.5-4-5-9-5z' },
+const groups = [
+  {
+    title: 'Analyser',
+    links: [
+      { to: '/', label: 'Tableau de bord', icon: 'M3 13h8V3H3zm0 8h8v-6H3zm10 0h8V11h-8zm0-18v6h8V3z' },
+      { to: '/nomenclature', label: 'Nomenclature NC', icon: 'M4 4h7v7H4zm9 0h7v7h-7zM4 13h7v7H4zm9 0h7v7h-7z' },
+      { to: '/carte', label: 'Carte du monde', icon: 'M15 5.1 9 3 3 5v16l6-2 6 2 6-2V3zM15 19l-6-2V5l6 2z' },
+      { to: '/comparateur', label: 'Comparateur', icon: 'M10 3H4v18h6zm10 6h-6v12h6z' },
+      { to: '/explorer', label: 'Explorateur', icon: 'M3 5h18v2H3zm0 6h18v2H3zm0 6h18v2H3z' },
+    ],
+  },
+  {
+    title: 'Partager',
+    links: [
+      { to: '/rapports', label: 'Rapports', icon: 'M6 2h9l5 5v15H6zm8 1.5V8h4.5zM9 12h8v1.5H9zm0 3h8v1.5H9zm0 3h5v1.5H9z' },
+      { to: '/compte', label: 'Mon compte', icon: 'M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10zm0 2c-5 0-9 2.5-9 5v3h18v-3c0-2.5-4-5-9-5z' },
+    ],
+  },
 ];
+const isActive = (to) => (to === '/' ? route.path === '/' : route.path.startsWith(to) || (to === '/nomenclature' && route.path.startsWith('/produits')));
 </script>
 
 <template>
@@ -50,7 +67,7 @@ const links = [
       <span class="tagline">Commerce UE ↔ hors UE par code NC · source Eurostat Comext</span>
       <div class="spacer" />
       <button class="btn btn-sm" title="Changer de thème" @click="cycleTheme">
-        Thème : {{ { auto: 'auto', light: 'clair', dark: 'sombre' }[theme] }}
+        <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2" /><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" /></svg><span class="theme-label"> Thème : {{ { auto: 'auto', light: 'clair', dark: 'sombre' }[theme] }}</span>
       </button>
       <span v-if="auth.user" class="user">
         {{ auth.user.name || auth.user.email }}
@@ -59,14 +76,26 @@ const links = [
       <button class="btn btn-sm" @click="logout">Déconnexion</button>
     </header>
     <nav class="sidebar" :class="{ open: menuOpen }" @click="menuOpen = false">
-      <RouterLink v-for="l in links" :key="l.to" :to="l.to" class="nav-link" :class="{ active: l.to === '/' ? route.path === '/' : route.path.startsWith(l.to) }">
-        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path :d="l.icon" fill="currentColor" /></svg>
-        {{ l.label }}
-      </RouterLink>
+      <template v-for="g in groups" :key="g.title">
+        <div class="nav-title">{{ g.title }}</div>
+        <RouterLink v-for="l in g.links" :key="l.to" :to="l.to" class="nav-link" :class="{ active: isActive(l.to) }">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path :d="l.icon" fill="currentColor" /></svg>
+          {{ l.label }}
+        </RouterLink>
+      </template>
+      <div class="nav-foot hint">Source : Eurostat Comext<br />Nomenclature combinée (NC)</div>
     </nav>
     <main class="content">
       <RouterView />
     </main>
+    <AddToReportModal />
+    <div class="toasts" aria-live="polite">
+      <div v-for="t in ui.toasts" :key="t.id" class="toast">
+        <span>{{ t.message }}</span>
+        <RouterLink v-if="t.link" :to="t.link" @click="ui.dismiss(t.id)">{{ t.linkLabel || 'Voir' }}</RouterLink>
+        <button class="btn btn-sm btn-ghost" aria-label="Fermer" @click="ui.dismiss(t.id)">✕</button>
+      </div>
+    </div>
   </div>
   <RouterView v-else />
 </template>
@@ -84,16 +113,25 @@ const links = [
 .spacer { flex: 1; }
 .user { font-size: 0.85rem; color: var(--text-2); display: flex; gap: 6px; align-items: center; }
 .burger { display: none; }
-.sidebar { padding: 16px 10px; border-right: 1px solid var(--border); background: var(--surface); display: flex; flex-direction: column; gap: 2px; }
+.sidebar { padding: 12px 10px; border-right: 1px solid var(--border); background: var(--surface); display: flex; flex-direction: column; gap: 2px; position: sticky; top: 56px; height: calc(100vh - 56px); overflow-y: auto; }
+.nav-title { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); padding: 14px 12px 4px; font-weight: 600; }
+.nav-foot { margin-top: auto; padding: 12px; }
+.toasts { position: fixed; right: 16px; bottom: 16px; z-index: 80; display: grid; gap: 8px; }
+.toast { display: flex; gap: 12px; align-items: center; background: var(--text); color: var(--page); padding: 10px 12px 10px 16px; border-radius: 10px; box-shadow: var(--shadow-pop); font-size: 0.88rem; }
+.toast a { color: var(--page); font-weight: 700; text-decoration: underline; }
+.toast .btn { color: var(--page); }
 .nav-link { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 8px; color: var(--text-2); font-size: 0.92rem; }
 .nav-link:hover { background: var(--surface-2); text-decoration: none; }
 .nav-link.active { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--text); font-weight: 600; }
-.content { padding: 24px; min-width: 0; }
+.content { padding: 24px 28px 48px; min-width: 0; max-width: 1500px; width: 100%; }
 @media (max-width: 900px) {
-  .layout { grid-template-columns: 1fr; }
+  .layout { grid-template-columns: minmax(0, 1fr); }
+  .topbar { gap: 8px; padding: 0 12px; min-width: 0; }
+  .theme-label { display: none; }
+  .brand { font-size: 0.95rem; }
   .tagline, .user { display: none; }
   .burger { display: inline-flex; }
-  .sidebar { display: none; position: fixed; top: 56px; left: 0; right: 0; z-index: 30; border-bottom: 1px solid var(--border); }
+  .sidebar { display: none; position: fixed; top: 56px; left: 0; right: 0; height: auto; max-height: calc(100vh - 56px); z-index: 30; border-bottom: 1px solid var(--border); }
   .sidebar.open { display: flex; }
   .content { padding: 16px; }
 }

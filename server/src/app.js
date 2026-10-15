@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import mongoose from 'mongoose';
 import { config } from './config.js';
 import { requireAuth } from './middleware/auth.js';
+import { statsCache } from './middleware/cache.js';
 import authRoutes from './routes/auth.js';
 import metaRoutes from './routes/meta.js';
 import statsRoutes from './routes/stats.js';
@@ -34,7 +35,7 @@ export function createApp() {
   app.use('/api/auth', rateLimit({ windowMs: 15 * 60 * 1000, limit: 50, standardHeaders: true, legacyHeaders: false }), authRoutes);
   app.use('/api', rateLimit({ windowMs: 60 * 1000, limit: 300, standardHeaders: true, legacyHeaders: false }));
   app.use('/api/meta', requireAuth, metaRoutes);
-  app.use('/api/stats', requireAuth, statsRoutes);
+  app.use('/api/stats', requireAuth, ...(config.env === 'test' ? [] : [statsCache()]), statsRoutes);
   app.use('/api/trade', requireAuth, tradeRoutes);
   app.use('/api/products', requireAuth, productRoutes);
   app.use('/api/nomenclature', requireAuth, nomenclatureRoutes);

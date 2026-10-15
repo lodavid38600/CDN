@@ -6,8 +6,8 @@ const auth = useAuthStore();
 onMounted(() => auth.fetchMe().catch(() => {}));
 
 const plans = [
-  { id: 'free', name: 'Gratuit', price: '0 €', features: ['Tableau de bord et graphiques', 'Explorateur et filtres', 'Export CSV limité à 1 000 lignes'] },
-  { id: 'pro', name: 'Pro', price: '49 € / mois', features: ['Tout le plan Gratuit', 'Export CSV jusqu\'à 100 000 lignes', 'Accès API (jeton JWT)', 'Support prioritaire'] },
+  { id: 'free', name: 'Gratuit', price: '0 €', features: ['Tableau de bord, nomenclature, carte et comparateur', 'Rapports et exports PDF / PowerPoint', 'Export CSV limité à 1 000 lignes'] },
+  { id: 'pro', name: 'Pro', price: '49 € / mois', features: ['Tout le plan Gratuit', 'Export CSV jusqu\'à 100 000 lignes', 'Prévisions et comparaisons illimitées', 'Accès API (jeton JWT)', 'Support prioritaire'] },
 ];
 </script>
 

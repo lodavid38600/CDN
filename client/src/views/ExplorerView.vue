@@ -1,7 +1,9 @@
 <script setup>
 import { ref, watch } from 'vue';
 import { api } from '../api.js';
-import { eurFull, kg, ncCode } from '../format.js';
+import { eurFull, kg, ncCode, rangeLabel } from '../format.js';
+import Flag from '../components/Flag.vue';
+import Sparkline from '../components/Sparkline.vue';
 import { useFilterSync } from '../useFilterSync.js';
 import { useAuthStore } from '../stores/auth.js';
 import FilterBar from '../components/FilterBar.vue';
@@ -59,6 +61,7 @@ const cols = [
   { key: null, label: 'Désignation' },
   { key: 'valueEur', label: 'Valeur', num: true },
   { key: 'quantityKg', label: 'Quantité', num: true },
+  { key: null, label: 'Profil mensuel' },
 ];
 </script>
 
@@ -67,7 +70,7 @@ const cols = [
     <div class="page-head">
       <div>
         <h1>Explorateur de données</h1>
-        <p>{{ new Intl.NumberFormat('fr-FR').format(result.total) }} lignes · une ligne = déclarant × partenaire × code NC × année × flux</p>
+        <p>{{ new Intl.NumberFormat('fr-FR').format(result.total) }} lignes · une ligne = déclarant × partenaire × code NC × année × flux<span v-if="filters.periodFrom || filters.periodTo"> · valeurs limitées aux mois de la période ({{ rangeLabel(filters.periodFrom, filters.periodTo) }})</span></p>
       </div>
       <button class="btn btn-primary" :disabled="exporting || !result.total" @click="exportCsv">
         {{ exporting ? 'Export…' : 'Exporter en CSV' }}
@@ -92,12 +95,13 @@ const cols = [
             <tr v-for="r in result.rows" :key="`${r.reporter}${r.partner}${r.product}${r.year}${r.flow}`">
               <td>{{ r.year }}</td>
               <td><span class="dot" :class="`dot-${r.flow}`" />{{ r.flow === 'import' ? 'Import' : 'Export' }}</td>
-              <td :title="r.reporterName"><span class="mono">{{ r.reporter }}</span> {{ r.reporterName }}</td>
-              <td :title="r.partnerName"><span class="mono">{{ r.partner }}</span> {{ r.partnerName }}</td>
-              <td><RouterLink class="mono" :to="`/produits/${r.product}`">{{ ncCode(r.product) }}</RouterLink></td>
+              <td :title="r.reporterName"><Flag :code="r.reporter" /> {{ r.reporterName }}</td>
+              <td :title="r.partnerName"><Flag :code="r.partner" /> {{ r.partnerName }}</td>
+              <td><RouterLink class="nc" :to="`/produits/${r.product}`">{{ ncCode(r.product) }}</RouterLink></td>
               <td class="desc secondary" :title="r.description">{{ r.description }}</td>
               <td class="num">{{ eurFull(r.valueEur) }}</td>
               <td class="num">{{ kg(r.quantityKg) }}</td>
+              <td><Sparkline v-if="r.monthly" :values="r.monthly" :width="80" :height="20" :color="`var(--${r.flow})`" /></td>
             </tr>
             <tr v-if="!result.rows.length && !loading"><td :colspan="cols.length" class="empty">Aucune donnée pour ces filtres</td></tr>
           </tbody>

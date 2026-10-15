@@ -39,10 +39,10 @@ function demo() {
       <h1>Les données douanières européennes, code NC par code NC.</h1>
       <p>Analysez les importations et exportations des 27 pays de l'UE avec le reste du monde, à partir des statistiques Eurostat Comext.</p>
       <ul>
-        <li>Codes NC à 8 chiffres classés par section et chapitre de la nomenclature combinée</li>
-        <li>Filtres par année, flux, pays déclarant, partenaire hors UE et catégorie</li>
-        <li>Graphiques d'évolution, classements des partenaires et soldes commerciaux</li>
-        <li>Export CSV des données filtrées</li>
+        <li>Navigation NC02 → NC06 → NC08 et fiche complète par code NC</li>
+        <li>Données mensuelles : « combien la France a-t-elle exporté de vin entre mars 2018 et janvier 2019 ? »</li>
+        <li>Carte du monde, drapeaux, comparateur multi-séries et prévisions</li>
+        <li>Rapports éditables en un clic, export PDF et PowerPoint</li>
       </ul>
     </section>
     <section class="card form-card">

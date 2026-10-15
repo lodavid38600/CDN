@@ -1,12 +1,15 @@
 <script setup>
 import { computed } from 'vue';
 import MultiSelect from './MultiSelect.vue';
+import PeriodPicker from './PeriodPicker.vue';
+import NcSearch from './NcSearch.vue';
 import { useFiltersStore } from '../stores/filters.js';
 import { useMetaStore } from '../stores/meta.js';
 
-defineProps({ hideProduct: Boolean, hideFlow: Boolean });
+const props = defineProps({ hide: { type: Array, default: () => [] } });
 const filters = useFiltersStore();
 const meta = useMetaStore();
+const show = (k) => !props.hide.includes(k);
 
 const countryOpts = (list) => list.map((c) => ({ value: c.code, label: c.name }));
 const sectionOpts = computed(() => meta.sections.map((s) => ({ value: s.code, label: s.label })));
@@ -19,42 +22,33 @@ const chapterOpts = computed(() =>
 
 <template>
   <form class="filters card" @submit.prevent>
-    <label class="field">Année de début
-      <select v-model.number="filters.yearFrom">
-        <option :value="null">—</option>
-        <option v-for="y in meta.years" :key="y" :value="y">{{ y }}</option>
-      </select>
-    </label>
-    <label class="field">Année de fin
-      <select v-model.number="filters.yearTo">
-        <option :value="null">—</option>
-        <option v-for="y in meta.years" :key="y" :value="y" :disabled="filters.yearFrom && y < filters.yearFrom">{{ y }}</option>
-      </select>
-    </label>
-    <label v-if="!hideFlow" class="field">Flux
-      <select v-model="filters.flow">
-        <option value="">Import + export</option>
-        <option value="import">Importations</option>
-        <option value="export">Exportations</option>
-      </select>
-    </label>
-    <div class="field"><span>Pays UE déclarant</span>
-      <MultiSelect v-model="filters.reporters" :options="countryOpts(meta.reporters)" placeholder="Toute l'UE" />
+    <div class="field wide"><span>Période</span>
+      <PeriodPicker v-model:from="filters.periodFrom" v-model:to="filters.periodTo" />
     </div>
-    <div class="field"><span>Partenaire hors UE</span>
-      <MultiSelect v-model="filters.partners" :options="countryOpts(meta.partners)" placeholder="Tous les partenaires" />
+    <div v-if="show('flow')" class="field flowf"><span>Flux</span>
+      <div class="seg flow">
+        <button type="button" :class="{ on: !filters.flow }" @click="filters.flow = ''">Les deux</button>
+        <button type="button" :class="{ on: filters.flow === 'import' }" @click="filters.flow = 'import'">Import</button>
+        <button type="button" :class="{ on: filters.flow === 'export' }" @click="filters.flow = 'export'">Export</button>
+      </div>
     </div>
-    <div class="field"><span>Section NC</span>
+    <div v-if="show('reporters')" class="field"><span>Pays UE déclarant</span>
+      <MultiSelect v-model="filters.reporters" :options="countryOpts(meta.reporters)" placeholder="Toute l'UE" flags />
+    </div>
+    <div v-if="show('partners')" class="field"><span>Partenaire hors UE</span>
+      <MultiSelect v-model="filters.partners" :options="countryOpts(meta.partners)" placeholder="Tous les partenaires" flags />
+    </div>
+    <div v-if="show('sections')" class="field"><span>Section NC</span>
       <MultiSelect v-model="filters.sections" :options="sectionOpts" placeholder="Toutes" />
     </div>
-    <div class="field"><span>Chapitre NC</span>
+    <div v-if="show('chapters')" class="field"><span>Chapitre NC02</span>
       <MultiSelect v-model="filters.chapters" :options="chapterOpts" placeholder="Tous" />
     </div>
-    <label v-if="!hideProduct" class="field">Code NC (préfixe)
-      <input v-model.trim="filters.product" inputmode="numeric" maxlength="10" placeholder="ex. 2204 ou 22042109" />
-    </label>
+    <div v-if="show('product')" class="field wide"><span>Produit / code NC</span>
+      <NcSearch v-model="filters.product" />
+    </div>
     <div class="actions">
-      <button type="button" class="btn btn-sm" :disabled="!filters.activeCount" @click="filters.reset()">
+      <button type="button" class="btn btn-sm btn-ghost" :disabled="!filters.activeCount" @click="filters.reset()">
         Réinitialiser<span v-if="filters.activeCount"> ({{ filters.activeCount }})</span>
       </button>
     </div>
@@ -62,7 +56,12 @@ const chapterOpts = computed(() =>
 </template>
 
 <style scoped>
-.filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px 12px; align-items: end; margin-bottom: 16px; }
+.filters { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px 12px; align-items: end; margin-bottom: 16px; position: sticky; top: 64px; z-index: 15; }
 .field > span { display: block; }
-.actions { display: flex; align-items: end; }
+.wide { grid-column: span 2; }
+.flowf { min-width: 190px; }
+.flow { width: 100%; }
+.flow button { flex: 1; padding: 4px 6px; }
+.actions { display: flex; align-items: end; justify-content: flex-end; }
+@media (max-width: 700px) { .wide { grid-column: span 1; } .filters { position: static; } }
 </style>

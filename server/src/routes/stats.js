@@ -96,42 +96,32 @@ router.get('/summary', async (req, res) => {
 async function monthlySeries(f, eff) {
   const fromK = periodKey(eff.from);
   const toK = periodKey(eff.to);
+  // Une seule passe : 12 accumulateurs par mesure (somme élément par élément des tableaux mensuels).
+  const acc = {};
+  for (let i = 0; i < 12; i++) {
+    acc[`v${i}`] = { $sum: { $ifNull: [{ $arrayElemAt: ['$months', i] }, { $divide: ['$valueEur', 12] }] } };
+    acc[`q${i}`] = { $sum: { $ifNull: [{ $arrayElemAt: ['$monthsKg', i] }, { $divide: ['$quantityKg', 12] }] } };
+  }
   const rows = await TradeFlow.aggregate([
     { $match: buildMatch({ ...f, from: eff.from, to: eff.to }, { omit: ['flow'] }) },
-    {
-      $project: {
-        flow: 1,
-        pts: {
-          $map: {
-            input: { $range: [0, 12] },
-            as: 'i',
-            in: {
-              p: { $add: [{ $multiply: ['$year', 100] }, '$$i', 1] },
-              v: { $ifNull: [{ $arrayElemAt: ['$months', '$$i'] }, { $divide: ['$valueEur', 12] }] },
-              q: { $ifNull: [{ $arrayElemAt: ['$monthsKg', '$$i'] }, { $divide: ['$quantityKg', 12] }] },
-            },
-          },
-        },
-      },
-    },
-    { $unwind: '$pts' },
-    { $match: { 'pts.p': { $gte: fromK, $lte: toK } } },
-    {
-      $group: {
-        _id: '$pts.p',
-        importEur: { $sum: { $cond: [{ $eq: ['$flow', 'import'] }, '$pts.v', 0] } },
-        exportEur: { $sum: { $cond: [{ $eq: ['$flow', 'export'] }, '$pts.v', 0] } },
-        importKg: { $sum: { $cond: [{ $eq: ['$flow', 'import'] }, '$pts.q', 0] } },
-        exportKg: { $sum: { $cond: [{ $eq: ['$flow', 'export'] }, '$pts.q', 0] } },
-      },
-    },
+    { $group: { _id: { y: '$year', f: '$flow' }, ...acc } },
   ]);
+  const byKey = new Map();
+  for (const r of rows) {
+    for (let i = 0; i < 12; i++) {
+      const k = r._id.y * 100 + i + 1;
+      const e = byKey.get(k) || { importEur: 0, exportEur: 0, importKg: 0, exportKg: 0 };
+      e[`${r._id.f}Eur`] += r[`v${i}`];
+      e[`${r._id.f}Kg`] += r[`q${i}`];
+      byKey.set(k, e);
+    }
+  }
   // Série continue : les mois sans échange valent 0.
-  const byKey = new Map(rows.map((r) => [r._id, r]));
   const out = [];
   for (let p = eff.from; periodKey(p) <= toK; p = shiftPeriod(p, 1)) {
+    if (periodKey(p) < fromK) continue;
     const r = byKey.get(periodKey(p)) || { importEur: 0, exportEur: 0, importKg: 0, exportKg: 0 };
-    out.push(withBalance({ period: formatPeriod(p), year: p.y, month: p.m, importEur: r.importEur, exportEur: r.exportEur, importKg: r.importKg, exportKg: r.exportKg }));
+    out.push(withBalance({ period: formatPeriod(p), year: p.y, month: p.m, ...r }));
   }
   return out;
 }
