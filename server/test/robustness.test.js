@@ -477,3 +477,28 @@ it('tables de synthèse : résultats identiques aux lignes détaillées, jamais 
   clearStatsCache();
   assert.equal((await request(app).get('/api/stats/summary').set(auth())).body.exportEur, before + 1);
 });
+
+it('lignes mensuelles : dernier mois par défaut, plus récentes d\'abord, table préparée identique au calcul', async () => {
+  await rebuildCubes();
+  const meta = (await request(app).get('/api/meta').set(auth()).expect(200)).body;
+  const fast = (await request(app).get('/api/trade/mois?limit=20').set(auth()).expect(200)).body;
+  assert.equal(fast.window.from, meta.lastPeriod);
+  assert.ok(fast.rows.length > 0 && fast.rows.every((r) => r.period === meta.lastPeriod));
+  assert.ok(fast.rows.every((r, i) => i === 0 || fast.rows[i - 1].valueEur >= r.valueEur), 'tri par valeur dans le mois');
+  process.env.STATS_CUBES = 'false';
+  const slow = (await request(app).get('/api/trade/mois?limit=20').set(auth()).expect(200)).body;
+  delete process.env.STATS_CUBES;
+  const key = (r) => `${r.period}|${r.reporter}|${r.partner}|${r.product}|${r.flow}|${r.valueEur}`;
+  assert.deepEqual(fast.rows.map(key), slow.rows.map(key));
+  assert.equal(fast.total, slow.total);
+  // Avec un produit : toute la période, mois les plus récents d'abord ; somme = total annuel
+  const p = (await request(app).get('/api/trade/mois?product=85171300&reporters=FR&flow=export&periodFrom=2023-01&periodTo=2023-12&limit=500').set(auth()).expect(200)).body;
+  assert.ok(p.rows.every((r, i) => i === 0 || p.rows[i - 1].period >= r.period));
+  const annual = (await request(app).get('/api/stats/summary?product=85171300&reporters=FR&periodFrom=2023-01&periodTo=2023-12').set(auth()).expect(200)).body;
+  close(p.rows.reduce((s, r) => s + r.valueEur, 0), annual.exportEur, 2);
+  // Sans filtre, la fenêtre est limitée à 3 mois
+  const wide = (await request(app).get('/api/trade/mois?periodFrom=2015-01').set(auth()).expect(200)).body;
+  assert.equal(wide.window.clamped, true);
+  const csv = await request(app).get('/api/trade/mois.csv?product=85171300&reporters=FR').set(auth()).expect(200);
+  assert.match(csv.text.split('\n')[1], /^\d{4}-\d{2};/);
+});

@@ -1,4 +1,9 @@
-import { Router } from 'express';
+import express, { Router } from 'express';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { importLabels } from '../services/cnLabels.js';
+import { clearStatsCache } from '../middleware/cache.js';
 import mongoose from 'mongoose';
 import { JobRun, Rejected, Meta } from '../models/System.js';
 import { NcLink } from '../models/NcLink.js';
@@ -145,6 +150,25 @@ router.post('/cubes', requirePerm('site.manage'), async (req, res) => {
   rebuildCubes().catch((e) => console.error(e));
   await audit(req, { action: 'donnees.syntheses.reconstruites', category: 'donnees', message: 'Reconstruction des tables de synthèse lancée' });
   res.status(202).json({ started: true });
+});
+
+// --- Libellés de la nomenclature (fichier officiel : CSV, TSV ou Excel .xlsx)
+router.post('/labels', requirePerm('site.manage'), express.raw({ type: () => true, limit: '60mb' }), async (req, res) => {
+  if (!req.body?.length) return res.status(400).json({ error: 'Fichier vide' });
+  const name = path.basename(String(req.headers['x-file-name'] || 'libelles')).replace(/[^\w.-]/g, '_');
+  const tmp = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'labels-')), name);
+  try {
+    fs.writeFileSync(tmp, req.body);
+    const result = await importLabels(tmp, { replaceAll: req.query.mode !== 'provisoires' });
+    clearStatsCache();
+    await audit(req, { action: 'nomenclature.libelles.importes', category: 'donnees', target: name, message: `Libellés de la nomenclature importés : ${result.labels} codes (${result.byLevel[8]} NC8)`, details: result });
+    res.json(result);
+  } catch (e) {
+    await audit(req, { action: 'nomenclature.libelles.echec', category: 'donnees', level: 'error', target: name, message: `Import des libellés impossible : ${e.message}` });
+    res.status(400).json({ error: e.message });
+  } finally {
+    fs.rmSync(path.dirname(tmp), { recursive: true, force: true });
+  }
 });
 
 // --- Actualités (page d'accueil)

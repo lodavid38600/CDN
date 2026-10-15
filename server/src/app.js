@@ -30,7 +30,7 @@ function analysisFeatures(req, res, next) {
   if (req.query.source === 'world') return requireFeature('world')(req, res, next);
   if (req.path.startsWith('/forecast')) return requireFeature('forecast')(req, res, next);
   if (req.path.startsWith('/prices')) return requireFeature('prices')(req, res, next);
-  if (req.path.startsWith('/export.csv')) return requireFeature('export')(req, res, next);
+  if (req.path.endsWith('.csv')) return requireFeature('export')(req, res, next);
   return next();
 }
 

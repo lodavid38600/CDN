@@ -3,6 +3,10 @@ import { pagination, parseFilters, hasMonthBounds } from '../services/filters.js
 import { countryName } from '../services/labels.js';
 import { buildScope } from '../services/scope.js';
 import { audit } from '../services/audit.js';
+import { getDataRange } from '../services/dataRange.js';
+import { formatPeriod } from '../services/filters.js';
+import { monthWindow, monthlyPage } from '../services/monthlyRows.js';
+import { TradeFlow } from '../models/TradeFlow.js';
 
 const router = Router();
 
@@ -107,6 +111,49 @@ router.get('/export.csv', async (req, res) => {
         .map(csvCell)
         .join(';') + '\n'
     );
+  }
+  res.end();
+});
+
+// --- Vue mensuelle : une ligne = un flux sur un mois, la déclaration la plus récente d'abord
+const MONTH_SORTS = ['recent', 'value', 'quantity', 'price'];
+async function monthlyRequest(req) {
+  const f = parseFilters(req.query);
+  const window = monthWindow(f, await getDataRange(TradeFlow));
+  const scope = await buildScope(f, { raw: req.query.nc === 'brut', noPeriodSlice: true });
+  const sort = MONTH_SORTS.includes(req.query.sort) ? req.query.sort : 'recent';
+  return { f, window, scope, sort, order: req.query.order === 'asc' ? 'asc' : 'desc' };
+}
+const rowView = (r) => ({
+  ...r, period: `${r.year}-${String(r.month).padStart(2, '0')}`,
+  reporterName: countryName(r.reporter), partnerName: countryName(r.partner),
+  currentCodes: r.tc && (r.tc.length > 1 || r.tc[0] !== r.product) ? r.tc : undefined, tc: undefined,
+});
+
+router.get('/mois', async (req, res) => {
+  const { f, window, scope, sort, order } = await monthlyRequest(req);
+  if (!window) return res.json({ rows: [], total: 0, page: 1, pages: 0 });
+  const { page, limit, skip } = pagination(req.query, { defaultLimit: 50, maxLimit: 500 });
+  const r = await monthlyPage({ f, scope, window, sort, order, skip, limit });
+  res.json({
+    page, limit, total: r.total, capped: r.capped, pages: Math.ceil(r.total / limit), sort, order,
+    window: { from: formatPeriod(window.from), to: formatPeriod(window.to), clamped: window.clamped },
+    rows: r.rows.map(rowView),
+  });
+});
+
+router.get('/mois.csv', async (req, res) => {
+  const { f, window, scope, sort, order } = await monthlyRequest(req);
+  const max = req.access.exportLimit;
+  audit(req, { action: 'export.csv', category: 'export', message: `Export CSV des lignes mensuelles (max ${max} lignes)`, details: req.query });
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="declarations-mensuelles.csv"');
+  res.write('\ufeffmois;annee;flux;declarant;partenaire;code_nc;designation;valeur_eur;quantite_kg;prix_eur_kg\n');
+  if (window) {
+    const { rows } = await monthlyPage({ f, scope, window, sort, order, skip: 0, limit: max, cap: 0 });
+    for (const r of rows.map(rowView)) {
+      res.write(`${[r.period, r.year, r.flow === 'import' ? 'importation' : 'exportation', r.reporterName, r.partnerName, r.product, r.description, r.valueEur, r.quantityKg, r.unitPrice ?? ''].map(csvCell).join(';')}\n`);
+    }
   }
   res.end();
 });

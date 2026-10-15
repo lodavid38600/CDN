@@ -21,7 +21,7 @@ export const CUBES = {
   country: { name: 'tradecubes_country', fields: new Set(['year', 'flow', 'reporter', 'partner', 'chapter', 'section']) },
 };
 // À incrémenter quand la liste ou la structure des tables change : reconstruction automatique
-const SCHEMA = 2;
+const SCHEMA = 3; // 3 : table des dernières déclarations
 
 /** Ordre d'essai : de la plus petite table à la plus grande. */
 export const CUBE_ORDER = ['chapter', 'reporter', 'partner', 'product', 'country'];
@@ -112,6 +112,50 @@ async function build(cube, groupId, project, indexes, from = null) {
   return mongoose.connection.collection(target).estimatedDocumentCount();
 }
 
+export const LATEST = 'tradecubes_latest';
+export const LATEST_ROWS = 5000;
+
+/**
+ * Déclarations du dernier mois disponible, les plus importantes d'abord : première page des
+ * lignes détaillées (vue mensuelle, sans filtre) servie instantanément.
+ */
+async function buildLatest() {
+  const chap = mongoose.connection.collection(CUBES.chapter.name);
+  const [top] = await chap.find({}, { projection: { year: 1 } }).sort({ year: -1 }).limit(1).toArray();
+  if (!top) return null;
+  let m = 11;
+  while (m > 0 && !(await chap.findOne({ year: top.year, [`months.${m}`]: { $gt: 0 } }))) m -= 1;
+  const y = top.year;
+  const tmp = `${LATEST}_construction`;
+  await mongoose.connection.collection(tmp).drop().catch(() => {});
+  const monthFilter = { year: y, $or: [{ [`months.${m}`]: { $gt: 0 } }, { [`monthsKg.${m}`]: { $gt: 0 } }] };
+  const counts = await TradeFlow.collection.aggregate([{ $match: monthFilter }, { $group: { _id: '$flow', n: { $sum: 1 } } }]).toArray();
+  for (const flow of ['import', 'export']) {
+    await TradeFlow.collection.aggregate([
+      { $match: { ...monthFilter, flow } },
+      { $project: { _id: 0, reporter: 1, partner: 1, product: 1, flow: 1, year: 1, tc: 1, valueEur: { $arrayElemAt: ['$months', m] }, quantityKg: { $arrayElemAt: ['$monthsKg', m] } } },
+      { $sort: { valueEur: -1, product: 1, reporter: 1, partner: 1 } },
+      { $limit: LATEST_ROWS },
+      { $set: { month: m + 1, period: y * 100 + m + 1 } },
+      { $merge: { into: tmp, whenMatched: 'keepExisting', whenNotMatched: 'insert' } },
+    ], { allowDiskUse: true }).toArray();
+  }
+  const c = mongoose.connection.collection(tmp);
+  if (!(await c.estimatedDocumentCount())) return null;
+  await c.createIndex({ flow: 1, valueEur: -1 });
+  await c.createIndex({ valueEur: -1 });
+  await c.rename(LATEST, { dropTarget: true });
+  const byFlow = Object.fromEntries(counts.map((r) => [r._id, r.n]));
+  return { period: `${y}-${String(m + 1).padStart(2, '0')}`, count: (byFlow.import || 0) + (byFlow.export || 0), byFlow };
+}
+
+/** État de la table des dernières déclarations (si les tables sont à jour). */
+export async function latestInfo() {
+  if (!(await cubesReady())) return null;
+  const doc = await Meta.findOne({ key: 'cubes' }, { 'info.latest': 1 }).lean();
+  return doc?.info?.latest || null;
+}
+
 /** Reconstruit les deux tables pour la version des données en cours. */
 export async function rebuildCubes() {
   const { version } = await getDataVersion({ maxAgeMs: 0 });
@@ -138,9 +182,10 @@ export async function rebuildCubes() {
     { reporter: '$_id.r', flow: '$_id.f', year: '$_id.y' }, [{ year: 1 }], 'country');
   const partner = await build('partner', { p: '$partner', f: '$flow', y: '$year' },
     { partner: '$_id.p', flow: '$_id.f', year: '$_id.y' }, [{ year: 1 }], 'country');
+  const latest = await buildLatest();
   // Version enregistrée seulement si les données n'ont pas changé pendant la construction
   const { version: now } = await getDataVersion({ maxAgeMs: 0 });
-  if (now === version) await Meta.updateOne({ key: 'cubes' }, { $set: { version, info: { schema: SCHEMA, builtAt: new Date(), rows: { country, product, chapter, reporter, partner } } } }, { upsert: true });
+  if (now === version) await Meta.updateOne({ key: 'cubes' }, { $set: { version, info: { schema: SCHEMA, builtAt: new Date(), rows: { country, product, chapter, reporter, partner }, latest } } }, { upsert: true });
   readAt = 0;
   return { version, ms: Date.now() - t0, rows: { country, product, chapter, reporter, partner }, current: now === version };
 }

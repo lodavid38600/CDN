@@ -20,6 +20,7 @@ import { CHAPTERS } from '../data/nomenclature.js';
 import { Nomenclature } from '../models/Nomenclature.js';
 import { rebuildCubes } from '../services/cubes.js';
 import { seedAccounts } from './seedAccounts.js';
+import { refreshSearchText } from '../services/cnLabels.js';
 import { Product } from '../models/Product.js';
 import { TradeFlow } from '../models/TradeFlow.js';
 
@@ -207,6 +208,7 @@ async function main() {
   console.log(`✔ Miroirs : ${w.mirror.mirroredCountries.join(', ')} ; SH6 : ${w.nc.official} liens`);
   await bumpDataVersion({ lastImport: new Date(), seed: true });
   console.log('✔ Tables de synthèse :', JSON.stringify(await rebuildCubes()));
+  console.log('✔ Index de recherche :', await refreshSearchText(), 'produits');
 
   const accounts = await seedAccounts();
   console.log(`✔ Comptes de démonstration : ${accounts.companies} sociétés, équipe (admin@douane-saas.eu, commercial@douane-saas.eu)`);

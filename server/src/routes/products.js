@@ -4,6 +4,7 @@ import { pagination, parseFilters, FilterError } from '../services/filters.js';
 import { chapterName, hs6Labels, sectionName } from '../services/labels.js';
 import { buildScope } from '../services/scope.js';
 import { codeHistory } from '../services/ncInfo.js';
+import { searchProducts } from '../services/cnLabels.js';
 
 const router = Router();
 
@@ -16,6 +17,12 @@ router.get('/', async (req, res) => {
   const f = parseFilters({ sections: req.query.sections, chapters: req.query.chapters });
   const { page, limit, skip } = pagination(req.query, { defaultLimit: 25, maxLimit: 200 });
   const q = String(req.query.q || '').trim().slice(0, 100);
+  // Recherche par mots ou par code : codes actuels, classés par pertinence, avec leur contexte
+  if (q && !f.sections && !f.chapters) {
+    const rows = await searchProducts(q, { limit });
+    const parents = await hs6Labels([...new Set(rows.map((p) => p.code.slice(0, 6)))]);
+    return res.json({ page: 1, limit, total: rows.length, pages: 1, rows: rows.map((p) => ({ ...p, hs6Label: parents[p.code.slice(0, 6)] || '', chapterLabel: chapterName(p.code.slice(0, 2)) })) });
+  }
 
   const match = {};
   if (f.sections) match.section = { $in: f.sections };

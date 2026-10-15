@@ -23,6 +23,7 @@ import { Product } from '../models/Product.js';
 import { Nomenclature } from '../models/Nomenclature.js';
 import { Rejected } from '../models/System.js';
 import { BulkFile } from '../models/BulkFile.js';
+import { importLabels, refreshSearchText } from './cnLabels.js';
 
 const require = createRequire(import.meta.url);
 
@@ -278,24 +279,9 @@ export async function processBulkFile(file, { source = path.basename(file), onPr
   return { ...stats, months: [...stats.months].sort() };
 }
 
-/** Libellés NC officiels (fichier « code<TAB>libellé », éventuellement compressé). */
+/** Libellés NC officiels : remplacent les libellés provisoires « Code NC … » (voir cnLabels.js). */
 export async function loadCnLabels(file) {
-  const { rl } = openLines(file);
-  const ops = [];
-  for await (const line of rl) {
-    const m = /^"?(\d{2}(?:\d{2})?(?:\d{2})?(?:\d{2})?)"?\s*[\t;|]\s*"?(.+?)"?\s*$/.exec(line.replace(/^﻿/, ''));
-    if (!m) continue;
-    const code = m[1];
-    if (![2, 4, 6, 8].includes(code.length)) continue;
-    ops.push({ updateOne: { filter: { code }, update: { $set: { code, level: code.length, label: m[2] } }, upsert: true } });
-  }
-  for (let i = 0; i < ops.length; i += 5000) await Nomenclature.bulkWrite(ops.slice(i, i + 5000), { ordered: false });
-  // Les libellés officiels remplacent les libellés provisoires « Code NC … »
-  const cn8 = ops.filter((o) => o.updateOne.filter.code.length === 8);
-  for (let i = 0; i < cn8.length; i += 5000) {
-    await Product.bulkWrite(cn8.slice(i, i + 5000).map((o) => ({ updateOne: { filter: { code: o.updateOne.filter.code, description: /^Code NC / }, update: { $set: { description: o.updateOne.update.$set.label } } } })), { ordered: false });
-  }
-  return { labels: ops.length };
+  return importLabels(file, { replaceAll: false });
 }
 
 // ------------------------------------------------------------------ téléchargement
@@ -377,6 +363,7 @@ export async function syncBulk({ from = config.bulk.from, to, force = false, onP
     }
     if (!done) report.missing += 1; // mois pas encore publié
   }
+  report.searchIndexed = await refreshSearchText();
   if (config.bulk.labelsUrl) {
     try {
       const dest = path.join(dir, path.basename(new URL(config.bulk.labelsUrl).pathname) || 'cn-labels.txt');

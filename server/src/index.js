@@ -8,6 +8,8 @@ import { TradeFlow } from './models/TradeFlow.js';
 import { WorldFlow } from './models/WorldFlow.js';
 import { ensureCubes } from './services/cubes.js';
 import { migrateLegacyUsers } from './services/accounts.js';
+import { refreshSearchText } from './services/cnLabels.js';
+import { Product } from './models/Product.js';
 
 // Période couverte calculée d'avance (au démarrage et à chaque nouvel import) : aucune page ne l'attend
 const warmUp = () => Promise.all([getDataRange(TradeFlow), getDataRange(WorldFlow)]).catch((e) => console.error('Calcul de la période :', e.message));
@@ -24,6 +26,8 @@ createApp().listen(config.port, () => {
   console.log(`API douanière démarrée sur http://localhost:${config.port}`);
   warmUp();
   warmCubes();
+  // Index de recherche par mots (base existante ou produits ajoutés hors chargement)
+  Product.exists({ $or: [{ st: { $exists: false } }, { st: '' }] }).then((missing) => missing && refreshSearchText()).catch((e) => console.error('Index de recherche :', e.message));
   onDataVersionChange(() => setTimeout(() => { warmUp(); warmCubes(); }, 0));
   if (startScheduler()) console.log(`Mise à jour automatique activée (toutes les ${config.autoUpdate.intervalHours} h)`);
 });

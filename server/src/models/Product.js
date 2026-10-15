@@ -12,10 +12,13 @@ const productSchema = new mongoose.Schema(
     validFrom: { type: Number, default: undefined },
     validTo: { type: Number, default: undefined }, // dernière année ; absent = code actuel
     status: { type: String, enum: ['current', 'obsolete', 'discontinued'], default: 'current' },
+    // Texte de recherche (minuscules, sans accents) : désignation + sous-position + position + chapitre
+    st: { type: String, default: '' },
   },
   { timestamps: true }
 );
 
 productSchema.index({ description: 'text', code: 'text' });
+productSchema.index({ st: 1 });
 
 export const Product = mongoose.model('Product', productSchema);
