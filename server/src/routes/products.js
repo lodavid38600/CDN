@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { Product } from '../models/Product.js';
 import { TradeFlow } from '../models/TradeFlow.js';
 import { pagination, parseFilters, buildMatch, FilterError } from '../services/filters.js';
-import { chapterName, sectionName } from '../services/labels.js';
+import { chapterName, hs6Labels, sectionName } from '../services/labels.js';
 
 const router = Router();
 
@@ -44,7 +44,10 @@ router.get('/:code', async (req, res) => {
 
   const f = parseFilters({ ...req.query, product: code });
   const years = await TradeFlow.distinct('year', buildMatch(f, { omit: ['flow'] }));
+  const hs6 = await hs6Labels([product.code.slice(0, 6)]);
   res.json({
+    hs6: product.code.slice(0, 6),
+    hs6Label: hs6[product.code.slice(0, 6)] || '',
     ...product,
     chapterLabel: chapterName(product.chapter),
     sectionLabel: sectionName(product.section),

@@ -42,23 +42,27 @@ export function* cells(dataset) {
   }
 }
 
-function parseYear(time) {
-  const m = /^(\d{4})/.exec(String(time));
-  return m ? Number(m[1]) : null;
+/** "2023" -> { year: 2023 } ; "2023M01" / "2023-01" -> { year: 2023, month: 1 } */
+export function parseTime(time) {
+  const m = /^(\d{4})(?:[M-]?(\d{2}))?$/.exec(String(time));
+  if (!m) return null;
+  return { year: Number(m[1]), month: m[2] ? Number(m[2]) : null };
 }
 
 /**
- * Convertit un jeu JSON-stat Comext en documents TradeFlow (une ligne par
- * déclarant × partenaire × produit × année × flux) et en libellés de produits.
+ * Convertit un jeu JSON-stat Comext (annuel ou mensuel) en documents TradeFlow
+ * (une ligne par déclarant × partenaire × produit × année × flux, avec le détail
+ * mensuel dans `months` / `monthsKg`) et en libellés de nomenclature.
  */
 export function toTradeFlows(dataset, { euCodes, extraEuOnly = true } = {}) {
   const rows = new Map();
   for (const cell of cells(dataset)) {
     const indicator = INDICATORS[cell.indicators];
     const flow = FLOW_CODES[cell.flow];
-    const year = parseYear(cell.time);
+    const time = parseTime(cell.time);
     const product = String(cell.product);
-    if (!indicator || !flow || !year || !/^\d{8}$/.test(product)) continue;
+    if (!indicator || !flow || !time || !/^\d{8}$/.test(product)) continue;
+    const { year, month } = time;
     if (euCodes && !euCodes.has(cell.reporter)) continue;
     if (extraEuOnly && euCodes && euCodes.has(cell.partner)) continue;
 
@@ -67,12 +71,19 @@ export function toTradeFlows(dataset, { euCodes, extraEuOnly = true } = {}) {
     if (!row) {
       const chapter = product.slice(0, 2);
       row = {
-        reporter: cell.reporter, partner: cell.partner, product, chapter,
+        reporter: cell.reporter, partner: cell.partner, product, hs6: product.slice(0, 6), chapter,
         section: sectionOfChapter(chapter), year, flow, valueEur: 0, quantityKg: 0, source: 'eurostat',
       };
       rows.set(key, row);
     }
-    row[indicator.field] += cell.value * indicator.factor;
+    const v = cell.value * indicator.factor;
+    row[indicator.field] += v;
+    if (month) {
+      const arr = indicator.field === 'valueEur' ? 'months' : 'monthsKg';
+      row.months ??= Array(12).fill(0);
+      row.monthsKg ??= Array(12).fill(0);
+      row[arr][month - 1] += v;
+    }
   }
 
   const labels = dataset.dimension.product?.category?.label || {};
@@ -82,5 +93,10 @@ export function toTradeFlows(dataset, { euCodes, extraEuOnly = true } = {}) {
       code, description, chapter: code.slice(0, 2), heading: code.slice(0, 4), section: sectionOfChapter(code.slice(0, 2)),
     }));
 
-  return { flows: [...rows.values()], products };
+  // Libellés de tous les niveaux renvoyés (NC02, NC04, NC06, NC08).
+  const nomenclature = Object.entries(labels)
+    .filter(([code]) => /^(\d{2}|\d{4}|\d{6}|\d{8})$/.test(code))
+    .map(([code, label]) => ({ code, level: code.length, label }));
+
+  return { flows: [...rows.values()], products, nomenclature };
 }

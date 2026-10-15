@@ -9,6 +9,8 @@ const url = process.env.MONGO_TEST_URL || 'mongodb://127.0.0.1:27017/douane_saas
 const { createApp } = await import('../src/app.js');
 const { Product } = await import('../src/models/Product.js');
 const { TradeFlow } = await import('../src/models/TradeFlow.js');
+const { Nomenclature } = await import('../src/models/Nomenclature.js');
+const { invalidateDataRange } = await import('../src/services/dataRange.js');
 
 let available = true;
 try {
@@ -20,17 +22,33 @@ const it = (name, fn) => test(name, { skip: !available && 'MongoDB indisponible'
 
 const app = createApp();
 let token;
+const auth = () => ({ Authorization: `Bearer ${token}` });
+
+// 10 € par mois (12 kg) sauf mention contraire.
+const monthly = (v = 10, n = 12) => Array.from({ length: 12 }, (_, i) => (i < n ? v : 0));
+function flow(o) {
+  const months = o.months || monthly();
+  const monthsKg = months.map((v) => v * 1.2);
+  return {
+    product: '22042109', hs6: '220421', chapter: '22', section: 'IV', source: 'demo',
+    valueEur: months.reduce((a, b) => a + b, 0), quantityKg: monthsKg.reduce((a, b) => a + b, 0),
+    months, monthsKg, ...o,
+  };
+}
 
 before(async () => {
   if (!available) return;
   await mongoose.connection.dropDatabase();
+  await TradeFlow.syncIndexes();
+  invalidateDataRange();
   await Product.create({ code: '22042109', description: 'Vins AOP', chapter: '22', heading: '2204', section: 'IV' });
-  const base = { product: '22042109', chapter: '22', section: 'IV', source: 'demo' };
+  await Nomenclature.create({ code: '220421', level: 6, label: 'Vins en récipients ≤ 2 l' });
   await TradeFlow.insertMany([
-    { ...base, reporter: 'FR', partner: 'US', year: 2022, flow: 'export', valueEur: 100, quantityKg: 10 },
-    { ...base, reporter: 'FR', partner: 'US', year: 2023, flow: 'export', valueEur: 150, quantityKg: 15 },
-    { ...base, reporter: 'FR', partner: 'US', year: 2023, flow: 'import', valueEur: 20, quantityKg: 2 },
-    { ...base, reporter: 'IT', partner: 'CN', year: 2023, flow: 'export', valueEur: 80, quantityKg: 8 },
+    flow({ reporter: 'FR', partner: 'US', year: 2022, flow: 'export' }), // 120
+    flow({ reporter: 'FR', partner: 'US', year: 2023, flow: 'export', months: monthly(20) }), // 240
+    flow({ reporter: 'FR', partner: 'US', year: 2023, flow: 'import', months: monthly(2) }), // 24
+    flow({ reporter: 'IT', partner: 'CN', year: 2023, flow: 'export', months: monthly(5) }), // 60
+    flow({ reporter: 'IT', partner: 'CN', year: 2024, flow: 'export', months: monthly(5, 6) }), // 30, jan-juin
   ]);
 });
 
@@ -46,40 +64,81 @@ it('inscription puis accès protégé', async () => {
   await request(app).post('/api/auth/login').send({ email: 'a@b.fr', password: 'mauvais!' }).expect(401);
 });
 
-it('summary calcule totaux, solde et variation', async () => {
-  const { body } = await request(app).get('/api/stats/summary').set('Authorization', `Bearer ${token}`).expect(200);
-  assert.equal(body.exportEur, 330);
-  assert.equal(body.importEur, 20);
-  assert.equal(body.balanceEur, 310);
-  assert.equal(body.latestYear, 2023);
-  assert.equal(body.changeExport, (230 - 100) / 100);
+it('meta expose la dernière période disponible', async () => {
+  const { body } = await request(app).get('/api/meta').set(auth()).expect(200);
+  assert.equal(body.firstPeriod, '2022-01');
+  assert.equal(body.lastPeriod, '2024-06');
 });
 
-it('timeseries et top filtrent par pays', async () => {
-  const auth = { Authorization: `Bearer ${token}` };
-  const ts = await request(app).get('/api/stats/timeseries?reporters=FR').set(auth).expect(200);
-  assert.deepEqual(ts.body.map((r) => [r.year, r.exportEur]), [[2022, 100], [2023, 150]]);
-  const top = await request(app).get('/api/stats/top?dimension=partner&flow=export').set(auth).expect(200);
+it('summary sur une période au mois près (mars 2022 → janvier 2023)', async () => {
+  const { body } = await request(app)
+    .get('/api/stats/summary?reporters=FR&periodFrom=2022-03&periodTo=2023-01')
+    .set(auth())
+    .expect(200);
+  assert.equal(body.exportEur, 10 * 10 + 20); // mars-déc 2022 + janvier 2023
+  assert.equal(body.importEur, 2);
+  assert.equal(body.period.months, 11);
+  assert.equal(body.previous.from, '2021-03');
+});
+
+it('summary sans période : 12 derniers mois vs 12 précédents', async () => {
+  const { body } = await request(app).get('/api/stats/summary').set(auth()).expect(200);
+  assert.equal(body.exportEur, 120 + 240 + 60 + 30);
+  assert.equal(body.reference.from, '2023-07');
+  assert.equal(body.reference.to, '2024-06');
+  assert.equal(body.reference.exportEur, 6 * 20 + 6 * 5 + 30);
+});
+
+it('timeseries mensuelle et annuelle', async () => {
+  const m = await request(app).get('/api/stats/timeseries?granularity=month&periodFrom=2023-11&periodTo=2024-02').set(auth()).expect(200);
+  assert.deepEqual(m.body.map((r) => [r.period, r.exportEur]), [['2023-11', 25], ['2023-12', 25], ['2024-01', 5], ['2024-02', 5]]);
+  const y = await request(app).get('/api/stats/timeseries?reporters=IT').set(auth()).expect(200);
+  assert.deepEqual(y.body.map((r) => [r.year, r.exportEur, r.months]), [[2022, 0, 12], [2023, 60, 12], [2024, 30, 6]]);
+});
+
+it('top par NC06 et par partenaire', async () => {
+  const top = await request(app).get('/api/stats/top?dimension=partner&flow=export').set(auth()).expect(200);
   assert.deepEqual(top.body.map((r) => [r.key, r.label]), [['US', 'États-Unis'], ['CN', 'Chine']]);
+  const hs6 = await request(app).get('/api/stats/top?dimension=hs6').set(auth()).expect(200);
+  assert.equal(hs6.body[0].label, 'Vins en récipients ≤ 2 l');
+});
+
+it('prévision mensuelle', async () => {
+  const { body } = await request(app).get('/api/stats/forecast?horizon=3').set(auth()).expect(200);
+  assert.equal(body.forecast.length, 3);
+  assert.equal(body.forecast[0].period, '2024-07');
+  assert.ok(body.forecast.every((r) => r.exportLow <= r.export && r.export <= r.exportHigh));
 });
 
 it('trade pagine, enrichit et exporte en CSV', async () => {
-  const auth = { Authorization: `Bearer ${token}` };
-  const { body } = await request(app).get('/api/trade?flow=export&limit=2').set(auth).expect(200);
-  assert.equal(body.total, 3);
-  assert.equal(body.rows.length, 2);
-  assert.equal(body.rows[0].valueEur, 150);
+  const { body } = await request(app).get('/api/trade?flow=export&limit=2').set(auth()).expect(200);
+  assert.equal(body.total, 4);
+  assert.equal(body.rows[0].valueEur, 240);
   assert.equal(body.rows[0].description, 'Vins AOP');
-  const csv = await request(app).get('/api/trade/export.csv?year=2023').set(auth).expect(200);
+  const csv = await request(app).get('/api/trade/export.csv?year=2023').set(auth()).expect(200);
   assert.equal(csv.text.trim().split('\n').length, 4);
-  await request(app).get('/api/trade?flow=nope').set(auth).expect(400);
+  await request(app).get('/api/trade?flow=nope').set(auth()).expect(400);
 });
 
-it('fiche produit et recherche', async () => {
-  const auth = { Authorization: `Bearer ${token}` };
-  const p = await request(app).get('/api/products/22042109').set(auth).expect(200);
-  assert.deepEqual(p.body.years, [2022, 2023]);
-  await request(app).get('/api/products/99999999').set(auth).expect(404);
-  const s = await request(app).get('/api/products?q=vins').set(auth).expect(200);
-  assert.equal(s.body.total, 1);
+it('navigation dans la nomenclature', async () => {
+  const ch = await request(app).get('/api/nomenclature/22').set(auth()).expect(200);
+  assert.deepEqual(ch.body.children.map((c) => c.code), ['220421']);
+  const hs = await request(app).get('/api/nomenclature/220421').set(auth()).expect(200);
+  assert.deepEqual(hs.body.children.map((c) => c.code), ['22042109']);
+  await request(app).get('/api/nomenclature/2204').set(auth()).expect(400);
+  const p = await request(app).get('/api/products/22042109').set(auth()).expect(200);
+  assert.deepEqual(p.body.years, [2022, 2023, 2024]);
+});
+
+it('rapports : création, ajout de blocs, isolation entre comptes', async () => {
+  const created = await request(app).post('/api/reports').set(auth()).send({ title: 'Vins', blocks: [{ type: 'heading', text: 'Intro' }] }).expect(201);
+  const id = created.body._id;
+  await request(app).post(`/api/reports/${id}/blocks`).set(auth()).send({ blocks: [{ type: 'text', html: '<p>ok</p>' }] }).expect(200);
+  const list = await request(app).get('/api/reports').set(auth()).expect(200);
+  assert.equal(list.body[0].blockCount, 2);
+  await request(app).put(`/api/reports/${id}`).set(auth()).send({ blocks: [{ type: 'evil' }] }).expect(400);
+
+  const other = await request(app).post('/api/auth/register').send({ email: 'c@d.fr', password: 'motdepasse' }).expect(201);
+  await request(app).get(`/api/reports/${id}`).set({ Authorization: `Bearer ${other.body.token}` }).expect(404);
+  await request(app).delete(`/api/reports/${id}`).set(auth()).expect(204);
 });

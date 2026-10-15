@@ -2,6 +2,7 @@
 //
 // Exemples :
 //   npm run import:eurostat -- --products 22042109,87032319 --years 2021-2024
+//   (données mensuelles par défaut ; --freq A pour les seules données annuelles)
 //   npm run import:eurostat -- --products 22042109 --reporters FR,IT --partners US,CN,GB --years 2023
 //   npm run import:eurostat -- --from-db --years 2020-2024   (tous les codes NC déjà en base)
 //
@@ -12,6 +13,7 @@ import { config } from '../config.js';
 import { connectDb, disconnectDb } from '../db.js';
 import { EU_CODES, EU_COUNTRIES, EXTRA_EU_COUNTRIES } from '../data/countries.js';
 import { Product } from '../models/Product.js';
+import { Nomenclature } from '../models/Nomenclature.js';
 import { TradeFlow } from '../models/TradeFlow.js';
 import { toTradeFlows } from '../services/jsonstat.js';
 
@@ -24,6 +26,7 @@ const { values: args } = parseArgs({
     years: { type: 'string', default: String(new Date().getFullYear() - 2) },
     dataset: { type: 'string', default: config.eurostatDataset },
     'batch-size': { type: 'string', default: '10' },
+    freq: { type: 'string', default: 'M' },
   },
 });
 
@@ -46,7 +49,7 @@ async function fetchDataset(params) {
   const url = new URL(`${config.eurostatBaseUrl}/${args.dataset}`);
   url.searchParams.set('format', 'JSON');
   url.searchParams.set('lang', 'fr');
-  url.searchParams.set('freq', 'A');
+  url.searchParams.set('freq', args.freq === 'A' ? 'A' : 'M');
   for (const [k, list] of Object.entries(params)) for (const v of list) url.searchParams.append(k, v);
 
   for (let attempt = 1; attempt <= 4; attempt++) {
@@ -80,9 +83,15 @@ async function main() {
   for (const [i, batch] of batches.entries()) {
     for (const reporter of reporters) {
       console.log(`[${i + 1}/${batches.length}] ${reporter} — ${batch.join(', ')}`);
-      const data = await fetchDataset({ reporter: [reporter], partner: partners, product: batch, flow: ['1', '2'], time: years.map(String) });
+      // Les codes parents (NC06) sont demandés aussi pour récupérer leurs libellés.
+      const codes = [...batch, ...new Set(batch.map((p) => p.slice(0, 6)))];
+      const time = args.freq === 'A' ? years.map(String) : years.flatMap((y) => Array.from({ length: 12 }, (_, i) => `${y}M${String(i + 1).padStart(2, '0')}`));
+      const data = await fetchDataset({ reporter: [reporter], partner: partners, product: codes, flow: ['1', '2'], time });
       if (!data) continue;
-      const { flows, products: labels } = toTradeFlows(data, { euCodes: EU_CODES });
+      const { flows, products: labels, nomenclature } = toTradeFlows(data, { euCodes: EU_CODES });
+      if (nomenclature.length) {
+        await Nomenclature.bulkWrite(nomenclature.map((n) => ({ updateOne: { filter: { code: n.code }, update: { $set: n }, upsert: true } })));
+      }
 
       if (labels.length) {
         await Product.bulkWrite(labels.map((p) => ({ updateOne: { filter: { code: p.code }, update: { $set: p }, upsert: true } })));

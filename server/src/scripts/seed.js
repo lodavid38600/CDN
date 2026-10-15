@@ -1,20 +1,25 @@
 // Génère un jeu de données de démonstration réaliste (codes NC réels, montants simulés)
 // et un compte de démonstration. Les données Eurostat réelles s'importent via import:eurostat.
 //
-//   npm run seed                 (remplace les données de démo)
-//   npm run seed -- --years 2015-2024
+//   npm run seed                          (remplace les données de démo)
+//   npm run seed -- --from 2015-01 --to 2026-06
 
 import { parseArgs } from 'node:util';
 import { connectDb, disconnectDb } from '../db.js';
 import { EU_COUNTRIES, EXTRA_EU_COUNTRIES } from '../data/countries.js';
 import { sectionOfChapter } from '../data/nomenclature.js';
-import { DEMO_PRODUCTS } from '../data/demoProducts.js';
+import { DEMO_PRODUCTS, HS6_LABELS, SEASONALITY } from '../data/demoProducts.js';
+import { CHAPTERS } from '../data/nomenclature.js';
+import { Nomenclature } from '../models/Nomenclature.js';
 import { Product } from '../models/Product.js';
 import { TradeFlow } from '../models/TradeFlow.js';
 import { User } from '../models/User.js';
 
-const { values: args } = parseArgs({ options: { years: { type: 'string', default: '2015-2024' } } });
-const [fromYear, toYear] = args.years.split('-').map(Number);
+const { values: args } = parseArgs({
+  options: { from: { type: 'string', default: '2015-01' }, to: { type: 'string', default: '2026-06' } },
+});
+const [fromYear] = args.from.split('-').map(Number);
+const [toYear, lastMonth] = args.to.split('-').map(Number);
 
 // Générateur pseudo-aléatoire déterministe (mulberry32) : même seed => mêmes données.
 function rng(seed) {
@@ -43,11 +48,26 @@ const SPECIALISTS = {
   '33030010': ['FR', 'IT', 'ES'], '42022100': ['IT', 'FR'], '04069021': ['IE', 'NL'], '02032955': ['ES', 'DE', 'DK', 'NL'],
   '10019900': ['FR', 'RO', 'BG', 'DE'], '22030001': ['NL', 'BE', 'DE', 'IE'], '27090090': ['NL', 'DE', 'IT', 'ES', 'FR'],
   '27111100': ['FR', 'ES', 'NL', 'BE', 'IT'], '27112100': ['DE', 'IT', 'AT', 'SK'], '09011100': ['DE', 'BE', 'IT'],
-  '18010000': ['NL', 'BE', 'DE', 'FR'], '08030019': ['BE', 'NL', 'DE', 'IT'], '85171300': ['NL', 'DE', 'FR', 'IT'],
+  '18010000': ['NL', 'BE', 'DE', 'FR'], '08039010': ['BE', 'NL', 'DE', 'IT'], '85171300': ['NL', 'DE', 'FR', 'IT'],
 };
 
 // Chocs macro-économiques simplifiés (indice du commerce par année).
-const MACRO = { 2015: 0.86, 2016: 0.87, 2017: 0.92, 2018: 0.96, 2019: 0.97, 2020: 0.87, 2021: 1.0, 2022: 1.16, 2023: 1.08, 2024: 1.06, 2025: 1.08 };
+const MACRO = { 2015: 0.86, 2016: 0.87, 2017: 0.92, 2018: 0.96, 2019: 0.97, 2020: 0.87, 2021: 1.0, 2022: 1.16, 2023: 1.08, 2024: 1.06, 2025: 1.08, 2026: 1.1 };
+
+// Profil mensuel (moyenne 1) : saisonnalité du produit, creux d'août dans l'industrie,
+// choc du confinement au printemps 2020.
+function monthProfile(code, chapter, year) {
+  const [peak, amp] = SEASONALITY[code] || [1 + Math.floor(rand() * 12), 0.06];
+  const industrial = Number(chapter) >= 84 && Number(chapter) <= 90;
+  const raw = Array.from({ length: 12 }, (_, i) => {
+    let f = 1 + amp * Math.cos((2 * Math.PI * (i + 1 - peak)) / 12);
+    if (industrial && i === 7) f *= 0.78;
+    if (year === 2020 && (i === 3 || i === 4)) f *= 0.7;
+    return f;
+  });
+  const mean = raw.reduce((a, b) => a + b, 0) / 12;
+  return raw.map((f) => f / mean);
+}
 
 function yearFactor(year, chapter, product) {
   let f = MACRO[year] ?? 1;
@@ -66,7 +86,14 @@ async function main() {
     code, description, chapter: code.slice(0, 2), heading: code.slice(0, 4), section: sectionOfChapter(code.slice(0, 2)),
   }));
   await Product.bulkWrite(products.map((p) => ({ updateOne: { filter: { code: p.code }, update: { $set: p }, upsert: true } })));
+  const labels = [
+    ...Object.entries(CHAPTERS).map(([code, label]) => ({ code, level: 2, label })),
+    ...Object.entries(HS6_LABELS).map(([code, label]) => ({ code, level: 6, label })),
+    ...products.map((p) => ({ code: p.code, level: 8, label: p.description })),
+  ];
+  await Nomenclature.bulkWrite(labels.map((n) => ({ updateOne: { filter: { code: n.code }, update: { $set: n }, upsert: true } })));
   await TradeFlow.deleteMany({ source: 'demo' });
+  await TradeFlow.syncIndexes();
 
   const docs = [];
   for (const [code, , baseM, exportShare, pricePerKg] of DEMO_PRODUCTS) {
@@ -96,15 +123,25 @@ async function main() {
         const bias = 0.6 + rand() * 0.8;
         for (let year = fromYear; year <= toYear; year++) {
           const yf = yearFactor(year, chapter, code);
+          const nMonths = year === toYear ? lastMonth : 12;
+          const profile = monthProfile(code, chapter, year);
           for (const flow of ['import', 'export']) {
             const flowShare = flow === 'export' ? exportShare : 1 - exportShare;
             const noise = 0.85 + rand() * 0.3;
-            const valueEur = Math.round(baseM * 0.6e6 * share * flowShare * bias * yf * noise);
-            if (valueEur < 1000) continue; // secret statistique / valeurs négligeables
+            const annual = baseM * 0.6e6 * share * flowShare * bias * yf * noise;
+            if (annual < 12000) continue; // secret statistique / valeurs négligeables
             const price = pricePerKg * (0.9 + rand() * 0.2) * (MACRO[year] ?? 1);
+            const months = Array(12).fill(0);
+            const monthsKg = Array(12).fill(0);
+            for (let i = 0; i < nMonths; i++) {
+              const v = Math.round((annual / 12) * profile[i] * (0.88 + rand() * 0.24));
+              months[i] = v;
+              monthsKg[i] = Math.round(v / (price * (0.96 + rand() * 0.08)));
+            }
             docs.push({
-              reporter: r.code, partner: p.code, product: code, chapter, section, year, flow,
-              valueEur, quantityKg: Math.round(valueEur / price), source: 'demo',
+              reporter: r.code, partner: p.code, product: code, hs6: code.slice(0, 6), chapter, section, year, flow,
+              valueEur: months.reduce((a, b) => a + b, 0), quantityKg: monthsKg.reduce((a, b) => a + b, 0),
+              months, monthsKg, source: 'demo',
             });
           }
         }
@@ -122,7 +159,7 @@ async function main() {
   await demo.setPassword('demo12345');
   await demo.save();
 
-  console.log(`✔ ${products.length} codes NC, ${docs.length} flux (${fromYear}-${toYear})`);
+  console.log(`✔ ${products.length} codes NC, ${docs.length} lignes annuelles avec détail mensuel (${args.from} → ${args.to})`);
   console.log(`✔ Compte démo : ${email} / demo12345`);
   await disconnectDb();
 }

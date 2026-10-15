@@ -43,3 +43,16 @@ test('toTradeFlows agrège valeurs et quantités, ignore les partenaires UE', ()
   assert.equal(exp.year, 2023);
   assert.deepEqual(products, [{ code: '22042109', description: 'Vins AOP', chapter: '22', heading: '2204', section: 'IV' }]);
 });
+
+test('toTradeFlows répartit les données mensuelles', () => {
+  const monthlyDs = structuredClone(dataset);
+  monthlyDs.size[6] = 2;
+  monthlyDs.dimension.time = { category: { index: { '2023M01': 0, '2023M02': 1 } } };
+  // seul le partenaire US, import, valeur : index = ((0*2+0)*2+0)*2 + t
+  monthlyDs.value = { 0: 100, 1: 50 };
+  const { flows } = toTradeFlows(monthlyDs, { euCodes: EU_CODES });
+  assert.equal(flows.length, 1);
+  assert.equal(flows[0].valueEur, 150);
+  assert.deepEqual(flows[0].months.slice(0, 3), [100, 50, 0]);
+  assert.equal(flows[0].hs6, '220421');
+});
