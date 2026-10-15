@@ -68,6 +68,7 @@ before(async () => {
   await Promise.all([TradeFlow.syncIndexes(), WorldFlow.syncIndexes(), NcLink.syncIndexes()]);
   const res = await request(app).post('/api/auth/register').send({ email: 'r@t.fr', password: 'motdepasse' });
   token = res.body.token;
+  await mongoose.connection.collection('companies').updateOne({ _id: (await mongoose.connection.collection('users').findOne({ email: 'r@t.fr' })).companyId }, { $set: { plan: 'entreprise' } });
   for (const [code, d] of [['85171200', 'Téléphones (ancien)'], ['85171300', 'Smartphones'], ['85171400', 'Autres téléphones'], ['44011100', 'Bois de chauffage'], ['44012100', 'Plaquettes'], ['44031100', 'Bois brut']]) {
     await Product.create({ code, description: d, chapter: code.slice(0, 2), heading: code.slice(0, 4), section: code.startsWith('85') ? 'XVI' : 'IX' });
   }

@@ -54,3 +54,11 @@ const fxSchema = new mongoose.Schema(
 );
 fxSchema.index({ currency: 1, period: 1 }, { unique: true });
 export const FxRate = mongoose.model('FxRate', fxSchema);
+
+// Compteurs de numérotation (tickets, factures).
+const counterSchema = new mongoose.Schema({ _id: String, seq: { type: Number, default: 0 } }, { versionKey: false });
+export const Counter = mongoose.model('Counter', counterSchema);
+export async function nextSeq(name) {
+  const c = await Counter.findOneAndUpdate({ _id: name }, { $inc: { seq: 1 } }, { upsert: true, returnDocument: 'after' });
+  return c.seq;
+}

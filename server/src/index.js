@@ -7,6 +7,7 @@ import { onDataVersionChange } from './services/dataVersion.js';
 import { TradeFlow } from './models/TradeFlow.js';
 import { WorldFlow } from './models/WorldFlow.js';
 import { ensureCubes } from './services/cubes.js';
+import { migrateLegacyUsers } from './services/accounts.js';
 
 // Période couverte calculée d'avance (au démarrage et à chaque nouvel import) : aucune page ne l'attend
 const warmUp = () => Promise.all([getDataRange(TradeFlow), getDataRange(WorldFlow)]).catch((e) => console.error('Calcul de la période :', e.message));
@@ -17,6 +18,8 @@ const warmCubes = () => ensureCubes()
 
 await connectDb();
 console.log(`MongoDB connecté (${config.mongoUrl.replace(/\/\/.*@/, '//***@')})`);
+const migrated = await migrateLegacyUsers();
+if (migrated) console.log(`${migrated} compte(s) rattaché(s) à une société`);
 createApp().listen(config.port, () => {
   console.log(`API douanière démarrée sur http://localhost:${config.port}`);
   warmUp();

@@ -19,9 +19,9 @@ import { ANNUAL_FALLBACK } from '../connectors/fx.js';
 import { CHAPTERS } from '../data/nomenclature.js';
 import { Nomenclature } from '../models/Nomenclature.js';
 import { rebuildCubes } from '../services/cubes.js';
+import { seedAccounts } from './seedAccounts.js';
 import { Product } from '../models/Product.js';
 import { TradeFlow } from '../models/TradeFlow.js';
-import { User } from '../models/User.js';
 
 const { values: args } = parseArgs({
   options: { from: { type: 'string', default: '2015-01' }, to: { type: 'string', default: '2026-06' } },
@@ -208,13 +208,9 @@ async function main() {
   await bumpDataVersion({ lastImport: new Date(), seed: true });
   console.log('✔ Tables de synthèse :', JSON.stringify(await rebuildCubes()));
 
+  const accounts = await seedAccounts();
+  console.log(`✔ Comptes de démonstration : ${accounts.companies} sociétés, équipe (admin@douane-saas.eu, commercial@douane-saas.eu)`);
   const email = 'demo@douane-saas.eu';
-  let demo = await User.findOne({ email });
-  if (!demo) demo = new User({ email, name: 'Compte démo', company: 'Démo SAS', plan: 'pro' });
-  demo.role = 'admin';
-  await demo.setPassword('demo12345');
-  await demo.save();
-
   console.log(`✔ Compte démo : ${email} / demo12345`);
   await disconnectDb();
 }

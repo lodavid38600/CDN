@@ -41,6 +41,6 @@ export const config = {
     comtradeReporters: (process.env.COMTRADE_REPORTERS || 'CN,JP,KR,IN,BR,CA,AU,TR,MX,ZA,CH').split(',').map((s) => s.trim()).filter(Boolean),
     correspondenceUrls: (process.env.NC_CORRESPONDENCE_URLS || '').split(',').map((s) => s.trim()).filter(Boolean),
   },
-  // Limites d'export CSV par offre.
-  exportLimits: { free: 1000, pro: 100000 },
+  // Inscription en libre-service (sinon, comptes créés par l'équipe commerciale)
+  signupEnabled: process.env.SIGNUP_ENABLED !== 'false',
 };

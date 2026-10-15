@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { pagination, parseFilters, hasMonthBounds } from '../services/filters.js';
 import { countryName } from '../services/labels.js';
 import { buildScope } from '../services/scope.js';
-import { config } from '../config.js';
+import { audit } from '../services/audit.js';
 
 const router = Router();
 
@@ -94,7 +94,8 @@ function csvCell(v) {
 // Export CSV (séparateur « ; » pour Excel FR), plafonné selon l'offre.
 router.get('/export.csv', async (req, res) => {
   const { s, pre, source } = await rowsPipeline(req);
-  const max = config.exportLimits[req.user.plan] ?? config.exportLimits.free;
+  const max = req.access.exportLimit;
+  audit(req, { action: 'export.csv', category: 'export', message: `Export CSV des lignes détaillées (max ${max} lignes)`, details: req.query });
   const cursor = s.Model.aggregate([...sortedRows(s, pre, req.query, [{ $limit: max }]), ...lookupProduct(source === 'eu' ? 'products' : 'nomenclatures')]).allowDiskUse(true).cursor();
 
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');

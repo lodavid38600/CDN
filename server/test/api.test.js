@@ -11,6 +11,8 @@ const { Product } = await import('../src/models/Product.js');
 const { TradeFlow } = await import('../src/models/TradeFlow.js');
 const { Nomenclature } = await import('../src/models/Nomenclature.js');
 const { invalidateDataRange } = await import('../src/services/dataRange.js');
+const { Company } = await import('../src/models/Company.js');
+const { User } = await import('../src/models/User.js');
 
 let available = true;
 try {
@@ -60,6 +62,11 @@ it('inscription puis accès protégé', async () => {
   await request(app).get('/api/stats/summary').expect(401);
   const res = await request(app).post('/api/auth/register').send({ email: 'a@b.fr', password: 'motdepasse' }).expect(201);
   token = res.body.token;
+  // L'inscription crée la société (offre d'essai) : le compte de test passe à l'offre complète
+  const me = (await request(app).get('/api/auth/me').set(auth()).expect(200)).body;
+  assert.equal(me.company.plan, 'essai');
+  assert.equal(me.user.companyRole, 'owner');
+  await Company.updateOne({ _id: me.user.companyId }, { plan: 'entreprise' });
   await request(app).post('/api/auth/register').send({ email: 'a@b.fr', password: 'motdepasse' }).expect(409);
   await request(app).post('/api/auth/login').send({ email: 'a@b.fr', password: 'mauvais!' }).expect(401);
 });
