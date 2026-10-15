@@ -8,7 +8,14 @@ import { parseArgs } from 'node:util';
 import { connectDb, disconnectDb } from '../db.js';
 import { EU_COUNTRIES, EXTRA_EU_COUNTRIES } from '../data/countries.js';
 import { sectionOfChapter } from '../data/nomenclature.js';
-import { DEMO_PRODUCTS, HS6_LABELS, SEASONALITY } from '../data/demoProducts.js';
+import { DEMO_PRODUCTS, HS6_LABELS, SEASONALITY, DEMO_EXTRA_CODES, NC_CHANGES } from '../data/demoProducts.js';
+import { WorldFlow } from '../models/WorldFlow.js';
+import { NcLink } from '../models/NcLink.js';
+import { checkFlow } from '../services/quality.js';
+import { syncNomenclature } from '../services/ncSync.js';
+import { syncWorld } from '../services/worldSync.js';
+import { bumpDataVersion } from '../services/dataVersion.js';
+import { ANNUAL_FALLBACK } from '../connectors/fx.js';
 import { CHAPTERS } from '../data/nomenclature.js';
 import { Nomenclature } from '../models/Nomenclature.js';
 import { Product } from '../models/Product.js';
@@ -82,7 +89,7 @@ function yearFactor(year, chapter, product) {
 async function main() {
   await connectDb();
 
-  const products = DEMO_PRODUCTS.map(([code, description]) => ({
+  const products = [...DEMO_PRODUCTS.map(([code, description]) => [code, description]), ...Object.entries(DEMO_EXTRA_CODES)].map(([code, description]) => ({
     code, description, chapter: code.slice(0, 2), heading: code.slice(0, 4), section: sectionOfChapter(code.slice(0, 2)),
   }));
   await Product.bulkWrite(products.map((p) => ({ updateOne: { filter: { code: p.code }, update: { $set: p }, upsert: true } })));
@@ -93,9 +100,28 @@ async function main() {
   ];
   await Nomenclature.bulkWrite(labels.map((n) => ({ updateOne: { filter: { code: n.code }, update: { $set: n }, upsert: true } })));
   await TradeFlow.deleteMany({ source: 'demo' });
-  await TradeFlow.syncIndexes();
+  await WorldFlow.deleteMany({ $or: [{ demo: true }, { mirror: true }, { source: 'eurostat' }] });
+  await Promise.all([TradeFlow.syncIndexes(), WorldFlow.syncIndexes(), NcLink.syncIndexes()]);
 
   const docs = [];
+  // Changement de nomenclature : avant l'année du changement, le volume est déclaré sous
+  // l'ancien code ; après, il est réparti entre les nouveaux codes (prix différents).
+  const PRICE_FACTOR = { '85171400': 0.3, '85414200': 0.65 };
+  const emit = (doc) => {
+    const change = NC_CHANGES.find((c) => c.head === doc.product);
+    if (!change) return docs.push(doc);
+    if (doc.year < change.year) return docs.push({ ...doc, product: change.from, hs6: change.from.slice(0, 6) });
+    const entries = Object.entries(change.to);
+    const raw = entries.map(([, w]) => w * (0.94 + rand() * 0.12));
+    const sum = raw.reduce((a, b) => a + b, 0);
+    entries.forEach(([code], k) => {
+      const share = raw[k] / sum;
+      const pf = PRICE_FACTOR[code] || 1;
+      const months = doc.months.map((v) => Math.round(v * share));
+      const monthsKg = doc.monthsKg.map((q) => Math.round((q * share) / pf));
+      if (months.some((v) => v > 0)) docs.push({ ...doc, product: code, hs6: code.slice(0, 6), months, monthsKg });
+    });
+  };
   for (const [code, , baseM, exportShare, pricePerKg] of DEMO_PRODUCTS) {
     const chapter = code.slice(0, 2);
     const section = sectionOfChapter(chapter);
@@ -138,9 +164,8 @@ async function main() {
               months[i] = v;
               monthsKg[i] = Math.round(v / (price * (0.96 + rand() * 0.08)));
             }
-            docs.push({
+            emit({
               reporter: r.code, partner: p.code, product: code, hs6: code.slice(0, 6), chapter, section, year, flow,
-              valueEur: months.reduce((a, b) => a + b, 0), quantityKg: monthsKg.reduce((a, b) => a + b, 0),
               months, monthsKg, source: 'demo',
             });
           }
@@ -149,19 +174,125 @@ async function main() {
     }
   }
 
-  for (let i = 0; i < docs.length; i += 5000) {
-    await TradeFlow.insertMany(docs.slice(i, i + 5000), { ordered: false });
+  // Mêmes contrôles de qualité que pour les données réelles
+  const valid = [];
+  for (const d of docs) {
+    const res = checkFlow(d, { level: 8 });
+    if (res.ok) valid.push({ ...res.doc, tc: [res.doc.product] });
   }
+  for (let i = 0; i < valid.length; i += 5000) {
+    await TradeFlow.insertMany(valid.slice(i, i + 5000), { ordered: false });
+  }
+  console.log(`✔ UE : ${products.length} codes NC, ${valid.length} lignes annuelles avec détail mensuel (${args.from} → ${args.to}), ${docs.length - valid.length} rejetées`);
+
+  const world = await seedWorld(valid);
+  console.log(`✔ Monde : ${world} lignes déclarées par des pays hors UE`);
+
+  console.log('  synchronisation de la nomenclature NC8…');
+  const nc = await syncNomenclature({ level: 8 });
+  console.log(`✔ NC8 : ${nc.official} liens officiels, ${nc.inferred || 0} déduits, ${nc.implicit || 0} implicites, ${nc.changedCodes} codes modifiés`);
+  console.log('  construction du jeu mondial (UE + miroirs + SH6)…');
+  const w = await syncWorld();
+  console.log(`✔ Miroirs : ${w.mirror.mirroredCountries.join(', ')} ; SH6 : ${w.nc.official} liens`);
+  await bumpDataVersion({ lastImport: new Date(), seed: true });
 
   const email = 'demo@douane-saas.eu';
   let demo = await User.findOne({ email });
   if (!demo) demo = new User({ email, name: 'Compte démo', company: 'Démo SAS', plan: 'pro' });
+  demo.role = 'admin';
   await demo.setPassword('demo12345');
   await demo.save();
 
-  console.log(`✔ ${products.length} codes NC, ${docs.length} lignes annuelles avec détail mensuel (${args.from} → ${args.to})`);
   console.log(`✔ Compte démo : ${email} / demo12345`);
   await disconnectDb();
+}
+
+// Sources des pays hors UE simulées (mêmes devises et mêmes particularités que les vraies sources)
+const WORLD_REPORTERS = {
+  US: { source: 'us-census', currency: 'USD', kgFactor: 0.82, quality: ['poids-partiel'] },
+  GB: { source: 'uk-hmrc', currency: 'GBP' },
+  NO: { source: 'ssb', currency: 'NOK' },
+  CH: { source: 'comtrade', currency: 'USD' }, JP: { source: 'comtrade', currency: 'USD' },
+  KR: { source: 'comtrade', currency: 'USD' }, IN: { source: 'comtrade', currency: 'USD' },
+  BR: { source: 'comtrade', currency: 'USD' }, CA: { source: 'comtrade', currency: 'USD' },
+  AU: { source: 'comtrade', currency: 'USD' }, TR: { source: 'comtrade', currency: 'USD' },
+  MX: { source: 'comtrade', currency: 'USD' }, ZA: { source: 'comtrade', currency: 'USD' },
+};
+const PRIORITY = { 'us-census': 3, 'uk-hmrc': 3, ssb: 3, comtrade: 2 };
+const fxAnnual = (cur, y) => ANNUAL_FALLBACK[cur]?.[y] ?? ANNUAL_FALLBACK[cur]?.[2024] ?? 1;
+
+/**
+ * Données déclarées par des pays hors UE :
+ *  - leur commerce avec l'UE, cohérent avec les déclarations européennes (écarts CAF/FAB,
+ *    délais, devises), ce qui permet les comparaisons miroir ;
+ *  - leur commerce entre eux (États-Unis ↔ Chine, Japon ↔ Corée…), absent d'Eurostat.
+ */
+async function seedWorld(euDocs) {
+  const out = [];
+  const push = (d, cfg) => {
+    const rate = fxAnnual(cfg.currency, d.year);
+    const valueOrig = d.months.reduce((a, b) => a + b, 0) * rate;
+    const res = checkFlow({ ...d, currency: cfg.currency, valueOrig: Math.round(valueOrig), source: cfg.source, priority: PRIORITY[cfg.source], mirror: false, demo: true, quality: cfg.quality }, { level: 6 });
+    if (res.ok) out.push({ ...res.doc, tc: [res.doc.product] });
+  };
+  // 1. Commerce avec l'UE, vu par le partenaire
+  const agg = new Map();
+  for (const d of euDocs) {
+    if (!WORLD_REPORTERS[d.partner]) continue;
+    const key = `${d.partner}|${d.reporter}|${d.hs6}|${d.year}|${d.flow}`;
+    const e = agg.get(key) || { reporter: d.partner, partner: d.reporter, product: d.hs6, year: d.year, flow: d.flow === 'export' ? 'import' : 'export', months: Array(12).fill(0), monthsKg: Array(12).fill(0) };
+    for (let i = 0; i < 12; i++) {
+      e.months[i] += d.months[i];
+      e.monthsKg[i] += d.monthsKg[i];
+    }
+    agg.set(key, e);
+  }
+  for (const e of agg.values()) {
+    const cfg = WORLD_REPORTERS[e.reporter];
+    const cif = e.flow === 'import' ? 1.05 : 0.97; // importations valorisées CAF, exportations FAB
+    const lvl = 0.92 + rand() * 0.16;
+    const months = e.months.map((v) => Math.round(v * cif * lvl * (0.95 + rand() * 0.1)));
+    const monthsKg = e.monthsKg.map((q) => Math.round(q * (cfg.kgFactor || 1) * (0.97 + rand() * 0.06)));
+    push({ ...e, months, monthsKg }, cfg);
+  }
+  // 2. Commerce entre pays hors UE (inconnu d'Eurostat)
+  const nonEu = EXTRA_EU_COUNTRIES.map((c) => c.code);
+  for (const [code, , baseM, , pricePerKg] of DEMO_PRODUCTS) {
+    const chapter = code.slice(0, 2);
+    const reporters = pickN(Object.keys(WORLD_REPORTERS), 5);
+    for (const rep of reporters) {
+      const partners = pickN(['CN', ...nonEu.filter((c) => c !== rep && c !== 'CN')], 4).filter((c) => c !== rep);
+      for (const partner of partners) {
+        // Poids moyen ≈ 1 ; racine pour éviter que deux grands pays n'écrasent tout
+        const w = (Math.sqrt(PARTNER_WEIGHT[partner] * PARTNER_WEIGHT[rep]) / 4.4) * (0.5 + rand());
+        for (let year = fromYear; year <= toYear; year++) {
+          const nMonths = year === toYear ? lastMonth : 12;
+          const profile = monthProfile(code, chapter, year);
+          for (const flow of ['import', 'export']) {
+            // Commerce hors UE ≈ 30 % du commerce extra-UE du produit, réparti sur ~40 flux
+            const annual = ((baseM * 1e6 * 0.3) / 40) * 0.25 * w * yearFactor(year, chapter, code) * (0.85 + rand() * 0.3);
+            if (annual < 50000) continue;
+            const price = pricePerKg * (0.85 + rand() * 0.3);
+            const months = Array(12).fill(0);
+            const monthsKg = Array(12).fill(0);
+            for (let i = 0; i < nMonths; i++) {
+              months[i] = Math.round((annual / 12) * profile[i] * (0.9 + rand() * 0.2));
+              monthsKg[i] = Math.round(months[i] / price);
+            }
+            const change = NC_CHANGES.find((c) => c.head === code);
+            const hs = change && year < change.year ? change.from.slice(0, 6) : code.slice(0, 6);
+            push({ reporter: rep, partner, product: hs, year, flow, months, monthsKg }, WORLD_REPORTERS[rep]);
+          }
+        }
+      }
+    }
+  }
+  // Dédoublonnage (même pays, partenaire, produit, année, flux) puis insertion
+  const unique = new Map();
+  for (const d of out) unique.set(`${d.reporter}|${d.partner}|${d.product}|${d.year}|${d.flow}`, d);
+  const rows = [...unique.values()];
+  for (let i = 0; i < rows.length; i += 5000) await WorldFlow.insertMany(rows.slice(i, i + 5000), { ordered: false });
+  return rows.length;
 }
 
 main().catch(async (err) => {

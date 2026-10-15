@@ -1,117 +1,47 @@
-// Import des données Comext d'Eurostat (commerce UE / extra-UE par code NC8).
+// Import manuel des données Comext d'Eurostat (la mise à jour automatique utilise le même service).
 //
 // Exemples :
-//   npm run import:eurostat -- --products 22042109,87032319 --years 2021-2024
-//   (données mensuelles par défaut ; --freq A pour les seules données annuelles)
-//   npm run import:eurostat -- --products 22042109 --reporters FR,IT --partners US,CN,GB --years 2023
-//   npm run import:eurostat -- --from-db --years 2020-2024   (tous les codes NC déjà en base)
+//   npm run import:eurostat -- --products 22042109,87032319 --from 2021-01 --to 2024-12
+//   npm run import:eurostat -- --products 22042109 --reporters FR,IT --partners US,CN,GB --from 2023-01
+//   npm run import:eurostat -- --from-db --from 2024-01        (tous les codes NC déjà en base)
 //
-// Sans --reporters/--partners, tous les pays UE et les partenaires hors UE de référence sont interrogés.
-
+// Après l'import, la nomenclature est resynchronisée et la version des données incrémentée.
 import { parseArgs } from 'node:util';
-import { config } from '../config.js';
 import { connectDb, disconnectDb } from '../db.js';
-import { EU_CODES, EU_COUNTRIES, EXTRA_EU_COUNTRIES } from '../data/countries.js';
 import { Product } from '../models/Product.js';
-import { Nomenclature } from '../models/Nomenclature.js';
-import { TradeFlow } from '../models/TradeFlow.js';
-import { toTradeFlows } from '../services/jsonstat.js';
+import { importEurostat, monthRange } from '../services/eurostat.js';
+import { syncNomenclature } from '../services/ncSync.js';
+import { syncWorld } from '../services/worldSync.js';
+import { bumpDataVersion } from '../services/dataVersion.js';
 
+const now = new Date();
 const { values: args } = parseArgs({
   options: {
     products: { type: 'string' },
     'from-db': { type: 'boolean', default: false },
     reporters: { type: 'string' },
     partners: { type: 'string' },
-    years: { type: 'string', default: String(new Date().getFullYear() - 2) },
-    dataset: { type: 'string', default: config.eurostatDataset },
+    from: { type: 'string', default: `${now.getFullYear() - 2}-01` },
+    to: { type: 'string', default: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}` },
     'batch-size': { type: 'string', default: '10' },
-    freq: { type: 'string', default: 'M' },
   },
 });
-
-const csv = (s) => (s ? s.split(',').map((v) => v.trim()).filter(Boolean) : []);
-
-function yearRange(spec) {
-  const [a, b] = spec.split('-').map(Number);
-  const years = [];
-  for (let y = a; y <= (b || a); y++) years.push(y);
-  return years;
-}
-
-function chunk(arr, size) {
-  const out = [];
-  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
-  return out;
-}
-
-async function fetchDataset(params) {
-  const url = new URL(`${config.eurostatBaseUrl}/${args.dataset}`);
-  url.searchParams.set('format', 'JSON');
-  url.searchParams.set('lang', 'fr');
-  url.searchParams.set('freq', args.freq === 'A' ? 'A' : 'M');
-  for (const [k, list] of Object.entries(params)) for (const v of list) url.searchParams.append(k, v);
-
-  for (let attempt = 1; attempt <= 4; attempt++) {
-    const res = await fetch(url);
-    if (res.ok) return res.json();
-    if (res.status === 404 || res.status === 400) {
-      console.warn(`  ⚠ ${res.status} — aucune donnée pour cette requête`);
-      return null;
-    }
-    const wait = 2 ** attempt * 1000;
-    console.warn(`  ⚠ HTTP ${res.status}, nouvel essai dans ${wait / 1000}s`);
-    await new Promise((r) => setTimeout(r, wait));
-  }
-  throw new Error(`Échec de la requête Eurostat : ${url}`);
-}
+const csv = (s) => (s ? s.split(',').map((v) => v.trim()).filter(Boolean) : undefined);
 
 async function main() {
   await connectDb();
-  let products = csv(args.products);
-  if (args['from-db']) products = [...products, ...(await Product.distinct('code'))];
-  products = [...new Set(products)].filter((p) => /^\d{8}$/.test(p));
+  let products = csv(args.products) || [];
+  if (args['from-db']) products = [...products, ...(await Product.distinct('code', { status: { $ne: 'obsolete' } }))];
   if (!products.length) throw new Error('Indiquez --products <codes NC8> ou --from-db');
-
-  const reporters = csv(args.reporters).length ? csv(args.reporters) : EU_COUNTRIES.map((c) => c.code);
-  const partners = csv(args.partners).length ? csv(args.partners) : EXTRA_EU_COUNTRIES.map((c) => c.code);
-  const years = yearRange(args.years);
-  const batches = chunk(products, Number(args['batch-size']) || 10);
-
-  console.log(`Import ${args.dataset} : ${products.length} codes NC, ${reporters.length} déclarants, ${partners.length} partenaires, ${years.join(', ')}`);
-  let total = 0;
-  for (const [i, batch] of batches.entries()) {
-    for (const reporter of reporters) {
-      console.log(`[${i + 1}/${batches.length}] ${reporter} — ${batch.join(', ')}`);
-      // Les codes parents (NC06) sont demandés aussi pour récupérer leurs libellés.
-      const codes = [...batch, ...new Set(batch.map((p) => p.slice(0, 6)))];
-      const time = args.freq === 'A' ? years.map(String) : years.flatMap((y) => Array.from({ length: 12 }, (_, i) => `${y}M${String(i + 1).padStart(2, '0')}`));
-      const data = await fetchDataset({ reporter: [reporter], partner: partners, product: codes, flow: ['1', '2'], time });
-      if (!data) continue;
-      const { flows, products: labels, nomenclature } = toTradeFlows(data, { euCodes: EU_CODES });
-      if (nomenclature.length) {
-        await Nomenclature.bulkWrite(nomenclature.map((n) => ({ updateOne: { filter: { code: n.code }, update: { $set: n }, upsert: true } })));
-      }
-
-      if (labels.length) {
-        await Product.bulkWrite(labels.map((p) => ({ updateOne: { filter: { code: p.code }, update: { $set: p }, upsert: true } })));
-      }
-      if (flows.length) {
-        await TradeFlow.bulkWrite(
-          flows.map((f) => ({
-            updateOne: {
-              filter: { reporter: f.reporter, partner: f.partner, product: f.product, year: f.year, flow: f.flow },
-              update: { $set: f },
-              upsert: true,
-            },
-          })),
-          { ordered: false }
-        );
-      }
-      total += flows.length;
-    }
-  }
-  console.log(`✔ ${total} lignes importées / mises à jour`);
+  const report = await importEurostat({
+    products, reporters: csv(args.reporters), partners: csv(args.partners),
+    months: monthRange(args.from, args.to), batchSize: Number(args['batch-size']) || 10,
+    onProgress: (m) => console.log(`  ${m}`),
+  });
+  console.log('Import :', report);
+  console.log('Nomenclature NC8 :', await syncNomenclature({ level: 8 }));
+  console.log('Monde :', await syncWorld());
+  console.log('Version des données :', await bumpDataVersion({ lastImport: new Date() }));
   await disconnectDb();
 }
 

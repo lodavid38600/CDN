@@ -17,6 +17,7 @@ import tradeRoutes from './routes/trade.js';
 import productRoutes from './routes/products.js';
 import nomenclatureRoutes from './routes/nomenclature.js';
 import reportRoutes from './routes/reports.js';
+import adminRoutes from './routes/admin.js';
 
 export function createApp() {
   const app = express();
@@ -40,6 +41,7 @@ export function createApp() {
   app.use('/api/products', requireAuth, productRoutes);
   app.use('/api/nomenclature', requireAuth, nomenclatureRoutes);
   app.use('/api/reports', requireAuth, reportRoutes);
+  app.use('/api/admin', requireAuth, adminRoutes);
   app.use('/api', (req, res) => res.status(404).json({ error: 'Route inconnue' }));
 
   // En production, le client Vue compilé est servi par Express.

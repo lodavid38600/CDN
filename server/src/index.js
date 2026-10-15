@@ -1,9 +1,11 @@
 import { config } from './config.js';
 import { connectDb } from './db.js';
 import { createApp } from './app.js';
+import { startScheduler } from './services/scheduler.js';
 
 await connectDb();
 console.log(`MongoDB connecté (${config.mongoUrl.replace(/\/\/.*@/, '//***@')})`);
 createApp().listen(config.port, () => {
   console.log(`API douanière démarrée sur http://localhost:${config.port}`);
+  if (startScheduler()) console.log(`Mise à jour automatique activée (toutes les ${config.autoUpdate.intervalHours} h)`);
 });

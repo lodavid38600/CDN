@@ -4,6 +4,7 @@ import { Nomenclature } from '../models/Nomenclature.js';
 import { CHAPTERS, sectionOfChapter, nomenclatureTree } from '../data/nomenclature.js';
 import { FilterError } from '../services/filters.js';
 import { chapterName, hs6Labels, sectionName } from '../services/labels.js';
+import { codeHistory } from '../services/ncInfo.js';
 
 const router = Router();
 
@@ -32,33 +33,40 @@ router.get('/:code', async (req, res) => {
   let children = [];
 
   if (code.length === 2) {
-    const products = await Product.find({ chapter }, { code: 1 }).lean();
+    const products = await Product.find({ chapter }, { code: 1, status: 1 }).lean();
     const hs6 = [...new Set(products.map((p) => p.code.slice(0, 6)))].sort();
     const labels = await hs6Labels(hs6);
-    const n = (h) => products.filter((p) => p.code.startsWith(h)).length;
-    children = hs6.map((h) => ({ code: h, level: 6, label: labels[h] || h, productCount: n(h) }));
+    const under = (h) => products.filter((p) => p.code.startsWith(h));
+    // Une sous-position dont tous les codes ont été remplacés est marquée « ancienne ».
+    children = hs6.map((h) => ({
+      code: h, level: 6, label: labels[h] || h,
+      productCount: under(h).filter((p) => p.status !== 'obsolete').length,
+      obsolete: under(h).every((p) => p.status === 'obsolete'),
+    })).sort((a, b) => Number(a.obsolete) - Number(b.obsolete) || a.code.localeCompare(b.code));
   } else {
     const hs6 = code.slice(0, 6);
     const labels = await hs6Labels([hs6]);
     parents.push({ code: hs6, level: 6, label: labels[hs6] || hs6 });
     if (code.length === 6) {
       label = labels[hs6] || hs6;
-      const products = await Product.find({ code: { $regex: `^${hs6}` } }, { _id: 0, code: 1, description: 1 }).sort({ code: 1 }).lean();
+      const products = await Product.find({ code: { $regex: `^${hs6}` } }, { _id: 0, code: 1, description: 1, status: 1, validFrom: 1, validTo: 1 }).sort({ code: 1 }).lean();
       if (!products.length) return res.status(404).json({ error: 'Sous-position sans code NC disponible' });
-      children = products.map((p) => ({ code: p.code, level: 8, label: p.description }));
+      children = products.map((p) => ({ code: p.code, level: 8, label: p.description, obsolete: p.status === 'obsolete', validFrom: p.validFrom, validTo: p.validTo }))
+        .sort((a, b) => Number(a.obsolete) - Number(b.obsolete) || a.code.localeCompare(b.code));
     } else {
       const product = await Product.findOne({ code }).lean();
       if (!product) return res.status(404).json({ error: 'Code NC introuvable' });
       label = product.description;
-      const siblings = await Product.find({ code: { $regex: `^${hs6}` } }, { _id: 0, code: 1, description: 1 }).sort({ code: 1 }).lean();
-      children = siblings.map((p) => ({ code: p.code, level: 8, label: p.description, current: p.code === code }));
+      const siblings = await Product.find({ code: { $regex: `^${hs6}` } }, { _id: 0, code: 1, description: 1, status: 1 }).sort({ code: 1 }).lean();
+      children = siblings.map((p) => ({ code: p.code, level: 8, label: p.description, current: p.code === code, obsolete: p.status === 'obsolete' }));
       const heading = await Nomenclature.findOne({ code: code.slice(0, 4) }).lean();
       if (heading) parents.splice(1, 0, { code: heading.code, level: 4, label: heading.label });
     }
   }
 
+  const history = code.length === 2 ? null : await codeHistory(code, code.length === 8 ? 8 : 6);
   res.json({
-    code, level: code.length, label, chapter, section,
+    code, level: code.length, label, chapter, section, history,
     chapterLabel: chapterName(chapter), sectionLabel: sectionName(section),
     parents: parents.filter((p) => p.code !== code),
     children,

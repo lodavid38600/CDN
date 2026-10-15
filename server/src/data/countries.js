@@ -30,3 +30,5 @@ export const EXTRA_EU_COUNTRIES = [
 export const ALL_COUNTRIES = [...EU_COUNTRIES, ...EXTRA_EU_COUNTRIES];
 
 export const EU_CODES = new Set(EU_COUNTRIES.map((c) => c.code));
+
+export const ALL_CODES = new Set(ALL_COUNTRIES.map((c) => c.code));

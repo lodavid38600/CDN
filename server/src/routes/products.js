@@ -1,8 +1,9 @@
 import { Router } from 'express';
 import { Product } from '../models/Product.js';
-import { TradeFlow } from '../models/TradeFlow.js';
-import { pagination, parseFilters, buildMatch, FilterError } from '../services/filters.js';
+import { pagination, parseFilters, FilterError } from '../services/filters.js';
 import { chapterName, hs6Labels, sectionName } from '../services/labels.js';
+import { buildScope } from '../services/scope.js';
+import { codeHistory } from '../services/ncInfo.js';
 
 const router = Router();
 
@@ -27,7 +28,7 @@ router.get('/', async (req, res) => {
   }
   const [total, rows] = await Promise.all([
     Product.countDocuments(match),
-    Product.find(match, { _id: 0, __v: 0, createdAt: 0, updatedAt: 0 }).sort({ code: 1 }).skip(skip).limit(limit).lean(),
+    Product.find(match, { _id: 0, __v: 0, createdAt: 0, updatedAt: 0 }).sort({ status: 1, code: 1 }).skip(skip).limit(limit).lean(),
   ]);
   res.json({
     page, limit, total, pages: Math.ceil(total / limit),
@@ -43,9 +44,15 @@ router.get('/:code', async (req, res) => {
   if (!product) return res.status(404).json({ error: 'Code NC introuvable' });
 
   const f = parseFilters({ ...req.query, product: code });
-  const years = await TradeFlow.distinct('year', buildMatch(f, { omit: ['flow'] }));
-  const hs6 = await hs6Labels([product.code.slice(0, 6)]);
+  const scope = await buildScope(f, { omit: ['flow'], noPeriodSlice: true });
+  const [years, hs6, history] = await Promise.all([
+    scope.Model.distinct('year', scope.match),
+    hs6Labels([product.code.slice(0, 6)]),
+    codeHistory(code),
+  ]);
   res.json({
+    history,
+    nomenclature: scope.mode,
     hs6: product.code.slice(0, 6),
     hs6Label: hs6[product.code.slice(0, 6)] || '',
     ...product,

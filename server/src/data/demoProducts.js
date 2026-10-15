@@ -113,8 +113,30 @@ export const DEMO_PRODUCTS = [
   ['97011000', 'Tableaux, peintures et dessins faits entièrement à la main', 6000, 0.55, 8000],
 ];
 
+// Codes supprimés ou créés lors des changements de nomenclature simulés dans la démo
+// (changements réels de la NC : 2017 pour les voitures électriques, 2022 pour la téléphonie
+// et le photovoltaïque). Le volume suit le code « tête » ; avant le changement il est déclaré
+// sous l'ancien code, après il est réparti entre les nouveaux codes.
+export const DEMO_EXTRA_CODES = {
+  '85171200': 'Téléphones pour réseaux cellulaires et pour autres réseaux sans fil',
+  '85171400': 'Autres téléphones pour réseaux cellulaires ou pour d\'autres réseaux sans fil',
+  '85414090': 'Cellules photovoltaïques, même assemblées en modules ou constituées en panneaux',
+  '85414200': 'Cellules photovoltaïques non assemblées en modules ni constituées en panneaux',
+  '87039010': 'Voitures de tourisme à moteur électrique',
+};
+export const NC_CHANGES = [
+  { head: '87038010', year: 2017, from: '87039010', to: { '87038010': 1 } },
+  { head: '85171300', year: 2022, from: '85171200', to: { '85171300': 0.86, '85171400': 0.14 } },
+  { head: '85414300', year: 2022, from: '85414090', to: { '85414300': 0.78, '85414200': 0.22 } },
+];
+
 // Libellés des sous-positions SH6 (NC06) couvertes par la démo.
 export const HS6_LABELS = {
+  '851712': 'Téléphones pour réseaux cellulaires (SH 2017)',
+  '851714': 'Autres téléphones pour réseaux cellulaires',
+  '854140': 'Dispositifs photosensibles, cellules photovoltaïques (SH 2017)',
+  '854142': 'Cellules photovoltaïques non assemblées en modules',
+  '870390': 'Autres voitures de tourisme (dont électriques jusqu\'en 2016)',
   '010229': 'Bovins domestiques vivants (autres que reproducteurs)',
   '020329': 'Viandes porcines congelées (autres morceaux)',
   '020714': 'Morceaux et abats de coqs et poules, congelés',

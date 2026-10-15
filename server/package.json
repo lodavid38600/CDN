@@ -10,7 +10,9 @@
     "dev": "node --watch src/index.js",
     "seed": "node src/scripts/seed.js",
     "import:eurostat": "node src/scripts/importEurostat.js",
-    "test": "node --test --test-concurrency=1 \"test/**/*.test.js\""
+    "test": "node --test --test-concurrency=1 \"test/**/*.test.js\"",
+    "nc:sync": "node src/scripts/ncSync.js",
+    "update": "node src/scripts/update.js"
   },
   "engines": {
     "node": ">=20"
