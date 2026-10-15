@@ -156,8 +156,16 @@ export async function latestInfo() {
   return doc?.info?.latest || null;
 }
 
-/** Reconstruit les deux tables pour la version des données en cours. */
+/**
+ * Reconstruit les tables pour la version des données en cours, sous verrou : le serveur et un
+ * script de chargement lancés en même temps ne les construisent jamais à deux.
+ */
 export async function rebuildCubes() {
+  const r = await withLock('cubes', 3 * 60 * 60 * 1000, buildAll);
+  return r.ran ? r.result : { skipped: 'construction déjà en cours ailleurs' };
+}
+
+async function buildAll() {
   const { version } = await getDataVersion({ maxAgeMs: 0 });
   const t0 = Date.now();
   const country = await build(
@@ -192,7 +200,7 @@ export async function rebuildCubes() {
 
 /** Reconstruction si nécessaire, une seule à la fois même avec plusieurs serveurs. */
 export async function ensureCubes() {
-  if (process.env.STATS_CUBES === 'false') return { ran: false };
-  if (await cubesReady()) return { ran: false };
-  return withLock('cubes', 60 * 60 * 1000, async () => (await cubesReady() ? { skipped: true } : rebuildCubes()));
+  if (process.env.STATS_CUBES === 'false') return { ready: true };
+  if (await cubesReady()) return { ready: true };
+  return withLock('cubes', 3 * 60 * 60 * 1000, async () => (await cubesReady() ? { skipped: true } : buildAll()));
 }

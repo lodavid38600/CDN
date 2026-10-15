@@ -134,7 +134,7 @@ const windowText = computed(() => {
         <div class="card-head">
           <div>
             <h2>{{ new Intl.NumberFormat('fr-FR').format(result.total) }}{{ result.capped ? '+' : '' }} déclarations</h2>
-            <p>{{ windowText }}<span v-if="result.window?.clamped"> · sans produit ni pays choisi, la recherche porte sur 3 mois au plus</span></p>
+            <p>{{ windowText }}<span v-if="result.window?.kind !== 'product'"> · {{ result.window?.kind === 'country' ? 'avec seulement des pays, la recherche porte sur 12 mois au plus' : 'sans filtre, la recherche porte sur 3 mois au plus' }} : choisissez un produit pour tout l'historique</span></p>
           </div>
           <div class="row">
             <div class="seg" role="group" aria-label="Trier par">

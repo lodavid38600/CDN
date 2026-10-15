@@ -8,6 +8,9 @@ import { TradeFlow } from '../models/TradeFlow.js';
 import { News, Coverage } from '../models/Content.js';
 import { EU_CODES, countryLabel } from '../data/countries.js';
 import { getDataRange } from '../services/dataRange.js';
+import { countriesIndex } from '../services/countriesIndex.js';
+import { preparing } from '../services/preparation.js';
+import { cubesReady } from '../services/cubes.js';
 import { formatPeriod } from '../services/filters.js';
 
 // Page d'accueil : l'état de l'outil, sans noyer le visiteur sous les chiffres.
@@ -50,6 +53,8 @@ router.get('/', async (req, res) => {
 
   res.json({
     banner: site?.info?.banner || null,
+    // Préparation en cours, ou tables de synthèse pas encore prêtes pour ces données : pages plus lentes
+    preparing: preparing().length > 0 || (Boolean(data?.version) && !(await cubesReady())),
     lastUpdate: data?.updatedAt || null,
     period: range.first ? { from: formatPeriod(range.first), to: formatPeriod(range.last) } : null,
     news,
@@ -62,11 +67,8 @@ router.get('/', async (req, res) => {
 /** Pays couverts (déduits des données), en cours d'intégration et prévus (annoncés par l'équipe). */
 async function coverage() {
   if (coverageCache.data && Date.now() - coverageCache.at < 10 * 60 * 1000) return coverageCache.data;
-  const [reporters, world, announced] = await Promise.all([
-    TradeFlow.distinct('reporter'),
-    WorldFlow.aggregate([{ $group: { _id: '$reporter', sources: { $addToSet: '$source' }, mirror: { $min: { $cond: ['$mirror', 1, 0] } } } }]),
-    Coverage.find().lean(),
-  ]);
+  const [{ reporters, world: worldList }, announced] = await Promise.all([countriesIndex(), Coverage.find().lean()]);
+  const world = worldList.map((w) => ({ _id: w.code, sources: w.sources, mirror: w.mirrorOnly ? 1 : 0 }));
   const map = new Map();
   for (const c of reporters) if (EU_CODES.has(c)) map.set(c, { code: c, status: 'disponible', source: 'Eurostat' });
   for (const w of world) {

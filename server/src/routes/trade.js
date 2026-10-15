@@ -137,7 +137,7 @@ router.get('/mois', async (req, res) => {
   const r = await monthlyPage({ f, scope, window, sort, order, skip, limit });
   res.json({
     page, limit, total: r.total, capped: r.capped, pages: Math.ceil(r.total / limit), sort, order,
-    window: { from: formatPeriod(window.from), to: formatPeriod(window.to), clamped: window.clamped },
+    window: { from: formatPeriod(window.from), to: formatPeriod(window.to), clamped: window.clamped, kind: window.kind },
     rows: r.rows.map(rowView),
   });
 });

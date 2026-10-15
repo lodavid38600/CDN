@@ -22,7 +22,7 @@ const { screen, checkFlow } = await import('../src/services/quality.js');
 const { upsertMonthly, toYearly } = await import('../src/services/ingest.js');
 const { ingestWorldRecords } = await import('../src/connectors/index.js');
 const { aggregateEuIntoWorld, rebuildMirror } = await import('../src/services/worldSync.js');
-const { withLock } = await import('../src/services/lock.js');
+const { withLock, clearLegacyLocks } = await import('../src/services/lock.js');
 const { bumpDataVersion } = await import('../src/services/dataVersion.js');
 const { runUpdate } = await import('../src/services/updateJob.js');
 const { config } = await import('../src/config.js');
@@ -501,4 +501,20 @@ it('lignes mensuelles : dernier mois par défaut, plus récentes d\'abord, table
   assert.equal(wide.window.clamped, true);
   const csv = await request(app).get('/api/trade/mois.csv?product=85171300&reporters=FR').set(auth()).expect(200);
   assert.match(csv.text.split('\n')[1], /^\d{4}-\d{2};/);
+});
+
+it('verrou : libéré si le processus s\'arrête, jamais bloquant des heures', async () => {
+  // Verrou laissé par un processus arrêté pendant la tâche : bail court, déjà expiré
+  await Lock.create({ _id: 'cubes', owner: 'processus-arrete', expiresAt: new Date(Date.now() - 1000) });
+  const r = await rebuildCubes();
+  assert.ok(r.version !== undefined, 'construction effectuée malgré le verrou abandonné');
+  assert.equal(await Lock.countDocuments({ _id: 'cubes' }), 0, 'verrou rendu');
+  // Verrou réellement détenu ailleurs : on ne construit pas en double
+  await Lock.create({ _id: 'cubes', owner: 'autre-instance', expiresAt: new Date(Date.now() + 60000) });
+  assert.ok((await rebuildCubes()).skipped);
+  // Verrou d'une ancienne version (bail de 12 h) : supprimé au démarrage ; les baux courants restent
+  await Lock.create({ _id: 'mise-a-jour', owner: 'ancienne-version', expiresAt: new Date(Date.now() + 12 * 3600000) });
+  assert.equal(await clearLegacyLocks(), 1);
+  assert.equal(await Lock.countDocuments({ _id: 'cubes' }), 1);
+  await Lock.deleteMany({});
 });

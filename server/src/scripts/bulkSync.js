@@ -9,7 +9,7 @@ import { syncBulk, processBulkFile } from '../services/eurostatBulk.js';
 import { syncNomenclature } from '../services/ncSync.js';
 import { syncWorld } from '../services/worldSync.js';
 import { bumpDataVersion } from '../services/dataVersion.js';
-import { withLock } from '../services/lock.js';
+import { withLock, clearLegacyLocks } from '../services/lock.js';
 import { rebuildCubes } from '../services/cubes.js';
 import { Nomenclature } from '../models/Nomenclature.js';
 import { CHAPTERS } from '../data/nomenclature.js';
@@ -19,6 +19,7 @@ const { values } = parseArgs({
 });
 await connectDb();
 try {
+  await clearLegacyLocks();
   // Libellés des chapitres NC02 (base vide : la grille de navigation en a besoin)
   await Nomenclature.bulkWrite(Object.entries(CHAPTERS).map(([code, label]) => ({ updateOne: { filter: { code }, update: { $setOnInsert: { code, level: 2, label } }, upsert: true } })));
   const { ran, result } = await withLock('mise-a-jour', 12 * 60 * 60 * 1000, async () => {

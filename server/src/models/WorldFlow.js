@@ -39,6 +39,6 @@ worldFlowSchema.index({ reporter: 1, partner: 1, product: 1, year: 1, flow: 1 },
 worldFlowSchema.index({ tc: 1, year: 1 });
 worldFlowSchema.index({ product: 1, year: 1 });
 worldFlowSchema.index({ year: 1, flow: 1 });
-worldFlowSchema.index({ source: 1 });
+worldFlowSchema.index({ source: 1, reporter: 1 }); // pays par source, sans parcourir les lignes
 
 export const WorldFlow = mongoose.model('WorldFlow', worldFlowSchema);

@@ -4,7 +4,9 @@ import mongoose from 'mongoose';
 import { periodKey } from './filters.js';
 import { LATEST, LATEST_ROWS, latestInfo } from './cubes.js';
 
-const MAX_WINDOW_UNFILTERED = 3; // mois parcourus au plus sans filtre de produit ou de pays
+// Fenêtre parcourue : avec un produit, tout l'historique ; avec seulement des pays, 3 derniers mois
+// par défaut et 12 au plus ; sans filtre, le dernier mois par défaut et 3 au plus.
+const WINDOW = { product: { def: Infinity, max: Infinity }, country: { def: 3, max: 12 }, none: { def: 1, max: 3 } };
 
 const SORTS = {
   recent: (dir) => ({ period: dir, valueEur: -1, product: 1, reporter: 1, partner: 1, flow: 1 }),
@@ -19,14 +21,15 @@ const shift = (p, n) => { const t = p.y * 12 + p.m - 1 + n; return { y: Math.flo
 /** Fenêtre de mois parcourue (bornée sans filtre pour garder des réponses rapides). */
 export function monthWindow(f, range) {
   if (!range.last) return null;
-  const narrowed = Boolean(f.product || f.reporters || f.partners);
+  const kind = f.product ? 'product' : f.reporters || f.partners ? 'country' : 'none';
+  const { def, max } = WINDOW[kind];
   const to = f.to && periodKey(f.to) < periodKey(range.last) ? f.to : range.last;
-  // Sans début demandé : tout l'historique si la recherche est ciblée, sinon le dernier mois
-  let from = f.from ? (periodKey(f.from) > periodKey(range.first) ? f.from : range.first) : (narrowed ? range.first : to);
+  const first = (p) => (periodKey(p) > periodKey(range.first) ? p : range.first);
+  let from = f.from ? first(f.from) : (def === Infinity ? range.first : first(shift(to, -(def - 1))));
   if (periodKey(from) > periodKey(to)) return null;
   let clamped = false;
-  if (!narrowed && monthsBetween(from, to) > MAX_WINDOW_UNFILTERED) { from = shift(to, -(MAX_WINDOW_UNFILTERED - 1)); clamped = true; }
-  return { from, to, clamped, narrowed };
+  if (monthsBetween(from, to) > max) { from = shift(to, -(max - 1)); clamped = true; }
+  return { from, to, clamped, narrowed: kind !== 'none', kind };
 }
 
 /**

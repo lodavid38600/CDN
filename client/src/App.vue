@@ -32,6 +32,17 @@ function cycleTheme() {
 
 // Bandeau d'information et compteurs de messages non lus (actualisés chaque minute)
 const banner = ref(null);
+const preparing = ref(false);
+let prepTimer;
+async function loadHome() {
+  try {
+    const h = await api('/home');
+    banner.value = h.banner;
+    preparing.value = h.preparing;
+  } catch { /* ignoré */ }
+  clearTimeout(prepTimer);
+  if (preparing.value) prepTimer = setTimeout(loadHome, 20000); // jusqu'à la fin de la préparation
+}
 const unread = ref({ tickets: 0, chat: 0 });
 let timer;
 async function refresh() {
@@ -49,7 +60,7 @@ async function loadSession() {
   if (!auth.isAuthenticated) return;
   await auth.fetchMe().catch(() => {});
   if (auth.dataAccess) meta.load().catch(() => {});
-  api('/home').then((h) => { banner.value = h.banner; }).catch(() => {});
+  loadHome();
   refresh();
 }
 onMounted(() => {
@@ -181,6 +192,7 @@ async function changePassword() {
     </nav>
     <main class="content">
       <div v-if="banner" class="banner" role="status">{{ banner }}</div>
+      <div v-if="preparing" class="banner" role="status">Préparation des données en cours (quelques minutes après une mise à jour) : l'affichage peut être plus lent en attendant.</div>
       <div v-if="auth.loaded && !auth.dataAccess" class="banner warn" role="alert">
         {{ STATUS_TEXT[auth.access?.status] || STATUS_TEXT.none }}
         <RouterLink to="/assistance">Contacter notre équipe</RouterLink>
