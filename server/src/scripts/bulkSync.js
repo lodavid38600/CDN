@@ -24,7 +24,7 @@ try {
     let report;
     if (values.file) {
       report = { files: [] };
-      for (const f of values.file) report.files.push({ file: f, ...(await processBulkFile(f)) });
+      for (const f of values.file) report.files.push({ file: f, ...(await processBulkFile(f, { onProgress: (m) => console.log(m) })) });
     } else report = await syncBulk({ from: values.from, to: values.to, force: values.force, onProgress: (m) => console.log(m) });
     report.nc8 = await syncNomenclature({ level: 8 });
     report.world = await syncWorld();

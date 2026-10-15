@@ -17,14 +17,14 @@ export async function getDataRange(Model = TradeFlow) {
   const [maxDoc] = await Model.find({}, { year: 1 }).sort({ year: -1 }).limit(1).lean();
   let range = { first: null, last: null };
   if (minDoc) {
-    const [lastYear] = await Model.aggregate([
-      { $match: { year: maxDoc.year, months: { $type: 'array' } } },
-      { $project: { idx: { $range: [0, 12] }, months: 1 } },
-      { $unwind: { path: '$idx' } },
-      { $match: { $expr: { $gt: [{ $arrayElemAt: ['$months', '$idx'] }, 0] } } },
-      { $group: { _id: null, lastIdx: { $max: '$idx' } } },
-    ]);
-    range = { first: { y: minDoc.year, m: 1 }, last: { y: maxDoc.year, m: lastYear ? lastYear.lastIdx + 1 : 12 } };
+    // Premier et dernier mois réellement renseignés (une base qui commence en juin ne commence pas
+    // en janvier). Recherches qui s'arrêtent à la première ligne trouvée : rapides sur des millions de lignes.
+    const hasMonth = (year, i) => Model.exists({ year, [`months.${i}`]: { $gt: 0 } });
+    let firstM = 1;
+    for (let i = 0; i < 12; i++) if (await hasMonth(minDoc.year, i)) { firstM = i + 1; break; }
+    let lastM = 12;
+    for (let i = 11; i >= 0; i--) if (await hasMonth(maxDoc.year, i)) { lastM = i + 1; break; }
+    range = { first: { y: minDoc.year, m: firstM }, last: { y: maxDoc.year, m: lastM } };
   }
   cache.set(Model.modelName, { version, range });
   return range;

@@ -87,13 +87,18 @@ router.get('/summary', async (req, res) => {
     totals(cur, opts),
     custom ? null : totals(ref, opts),
     totals(prev, opts),
+    // Comptages : un seul passage, codes NC dépliés (une fusion d'ensembles serait quadratique
+    // sur les milliers de codes réels)
     aggregate(cur, opts, [
-      { $group: { _id: null, products: { $addToSet: { $ifNull: ['$tc', ['$product']] } }, partners: { $addToSet: '$partner' }, reporters: { $addToSet: '$reporter' } } },
+      { $project: { partner: 1, reporter: 1, tc: { $ifNull: ['$tc', ['$product']] } } },
+      { $unwind: '$tc' },
+      { $group: { _id: '$tc', partners: { $addToSet: '$partner' }, reporters: { $addToSet: '$reporter' } } },
+      { $group: { _id: null, products: { $sum: 1 }, partners: { $push: '$partners' }, reporters: { $push: '$reporters' } } },
       {
         $project: {
-          _id: 0,
-          products: { $size: { $reduce: { input: '$products', initialValue: [], in: { $setUnion: ['$$value', '$$this'] } } } },
-          partners: { $size: '$partners' }, reporters: { $size: '$reporters' },
+          _id: 0, products: 1,
+          partners: { $size: { $reduce: { input: '$partners', initialValue: [], in: { $setUnion: ['$$value', '$$this'] } } } },
+          reporters: { $size: { $reduce: { input: '$reporters', initialValue: [], in: { $setUnion: ['$$value', '$$this'] } } } },
         },
       },
     ], { noPeriodSlice: true }),

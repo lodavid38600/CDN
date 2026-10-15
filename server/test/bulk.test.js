@@ -137,6 +137,28 @@ it('archive .7z lue en flux', async () => {
   assert.equal((await flow()).months[2], 700);
 });
 
+it('écritures parallèles : plusieurs mois d\'une même ligne dans un fichier, petits lots concurrents', async () => {
+  const rows = [];
+  for (let m = 1; m <= 12; m++) for (const p of ['JP', 'KR', 'CA']) rows.push(old('IT', p, 'E', '04069021', '2', '1', `2023${String(m).padStart(2, '0')}`, 100 * m, m));
+  const f = write('annee.dat', [OLD_HEADER, ...rows].join('\n'));
+  let r = await processBulkFile(f, { batchSize: 2, concurrency: 4 });
+  assert.equal(r.flows, 36);
+  const check = async (factor) => {
+    for (const p of ['JP', 'KR', 'CA']) {
+      const d = await TradeFlow.findOne({ reporter: 'IT', partner: p, product: '04069021', year: 2023 }).lean();
+      assert.deepEqual(d.months, Array.from({ length: 12 }, (_, i) => factor * 100 * (i + 1)));
+      assert.equal(d.valueEur, factor * 7800);
+      assert.equal(d.quantityKg, 78);
+    }
+  };
+  await check(1);
+  // Révision de toute l'année : toutes les lignes existent, totaux recalculés
+  const f2 = write('annee2.dat', [OLD_HEADER, ...rows.map((l) => l.replace(/,(\d+),(\d+),$/, (_, v, q) => `,${2 * v},${q},`))].join('\n'));
+  r = await processBulkFile(f2, { batchSize: 5, concurrency: 4 });
+  assert.equal(r.updated, 36);
+  await check(2);
+});
+
 it('fichiers illisibles : erreur claire, base intacte', async () => {
   await assert.rejects(processBulkFile(write('vide.csv', '')), /vide/);
   await assert.rejects(processBulkFile(write('cols.csv', 'A,B,C\n1,2,3\n')), /colonnes absentes/);

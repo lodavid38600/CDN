@@ -13,7 +13,6 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import readline from 'node:readline';
 import { spawn } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
 import { pipeline } from 'node:stream/promises';
 import { createRequire } from 'node:module';
 import { config } from '../config.js';
@@ -23,7 +22,7 @@ import { TradeFlow } from '../models/TradeFlow.js';
 import { Product } from '../models/Product.js';
 import { Nomenclature } from '../models/Nomenclature.js';
 import { Rejected } from '../models/System.js';
-import { BulkFile, BulkStaging } from '../models/BulkFile.js';
+import { BulkFile } from '../models/BulkFile.js';
 
 const require = createRequire(import.meta.url);
 
@@ -73,15 +72,46 @@ function headerIndex(cells) {
   return idx;
 }
 
-const sectionExpr = (chapterField) => ({
-  $switch: {
-    branches: SECTIONS.map((s) => ({
-      case: { $and: [{ $gte: [{ $toInt: chapterField }, s.chapters[0]] }, { $lte: [{ $toInt: chapterField }, s.chapters[1]] }] },
-      then: s.code,
-    })),
-    default: 'XXI',
-  },
-});
+const sectionOf = (chapter) => SECTIONS.find((s) => Number(chapter) >= s.chapters[0] && Number(chapter) <= s.chapters[1])?.code || 'XXI';
+
+/** Nouvelle ligne de la base : un seul mois renseigné. */
+function newDoc(r, p, c, f, y, m, v, q) {
+  const months = Array(12).fill(0);
+  const monthsKg = Array(12).fill(0);
+  months[m] = v;
+  monthsKg[m] = q;
+  return {
+    reporter: r, partner: p, product: c, year: y, flow: f, hs6: c.slice(0, 6), chapter: c.slice(0, 2), section: sectionOf(c.slice(0, 2)),
+    months, monthsKg, valueEur: v, quantityKg: q, source: 'eurostat', tc: [c],
+  };
+}
+
+/**
+ * Écrit un lot : insertion directe (le cas le plus fréquent et le plus rapide) ; pour les lignes
+ * déjà présentes (autre mois de la même année, ou révision), seul le mois concerné est remplacé.
+ * Les totaux annuels de ces lignes sont recalculés en fin de fichier.
+ */
+async function writeBatch(coll, docs, m) {
+  let existing = [];
+  try {
+    await coll.insertMany(docs, { ordered: false });
+  } catch (e) {
+    const errors = e.writeErrors ? [].concat(e.writeErrors) : null;
+    if (!errors || errors.some((w) => (w.code ?? w.err?.code) !== 11000)) throw e;
+    existing = errors.map((w) => docs[w.index ?? w.err?.index]);
+  }
+  if (!existing.length) return 0;
+  await coll.bulkWrite(existing.map((d) => {
+    const i = m(d);
+    return {
+      updateOne: {
+        filter: { reporter: d.reporter, partner: d.partner, product: d.product, year: d.year, flow: d.flow },
+        update: { $set: { [`months.${i}`]: d.months[i], [`monthsKg.${i}`]: d.monthsKg[i], source: 'eurostat' } },
+      },
+    };
+  }), { ordered: false });
+  return existing.length;
+}
 
 /**
  * Charge un fichier bulk dans la base.
@@ -89,9 +119,9 @@ const sectionExpr = (chapterField) => ({
  * - ignore les totaux annuels (période « AAAA52 ») et les agrégats ;
  * - additionne les régimes statistiques d'un même flux ;
  * - remplace les mois présents dans le fichier (relancer ne double jamais les valeurs).
+ * Les lignes sont additionnées en mémoire pendant la lecture, puis écrites par lots parallèles.
  */
-export async function processBulkFile(file, { source = path.basename(file) } = {}) {
-  const run = randomUUID();
+export async function processBulkFile(file, { source = path.basename(file), onProgress = () => {}, batchSize = 2000, concurrency = 6 } = {}) {
   const stats = { lines: 0, kept: 0, intraEu: 0, annual: 0, otherLevel: 0, rejected: 0, months: new Set() };
   const rejectedSamples = [];
   const reject = (reason, line) => {
@@ -103,24 +133,39 @@ export async function processBulkFile(file, { source = path.basename(file) } = {
   child?.stderr.on('data', (d) => { childError += d; });
   const exited = child ? new Promise((resolve) => child.on('close', resolve)) : Promise.resolve(0);
 
+  // Agrégats en mémoire : clé « déclarant|partenaire|code|flux|année|mois » → indice dans les tableaux
+  const index = new Map();
+  let values = new Float64Array(1 << 20);
+  let kgs = new Float64Array(1 << 20);
+  const add = (key, v, q) => {
+    let i = index.get(key);
+    if (i === undefined) {
+      i = index.size;
+      if (i >= values.length) {
+        const grow = (a) => { const b = new Float64Array(a.length * 2); b.set(a); return b; };
+        values = grow(values);
+        kgs = grow(kgs);
+      }
+      index.set(key, i);
+    }
+    values[i] += v;
+    kgs[i] += q;
+  };
+
   let idx = null;
   let sep = ',';
-  let batch = [];
-  const flush = async () => {
-    if (!batch.length) return;
-    const docs = batch;
-    batch = [];
-    await BulkStaging.insertMany(docs, { ordered: false });
-  };
+  const t0 = Date.now();
+  const elapsed = () => `${Math.round((Date.now() - t0) / 1000)} s`;
   try {
     for await (const line of rl) {
       if (!line.trim()) continue;
       if (!idx) {
-        sep = [',', ';', '\t', '|'].find((s) => line.includes(s)) || ',';
+        sep = [',', ';', '\t', '|'].find((x) => line.includes(x)) || ',';
         idx = headerIndex(line.split(sep));
         continue;
       }
       stats.lines += 1;
+      if (stats.lines % 1_000_000 === 0) onProgress(`${(stats.lines / 1e6).toFixed(0)} M lignes lues (${elapsed()})`);
       const c = line.split(sep).map((x) => x.trim().replace(/^"|"$/g, ''));
       const reporter = normalizeCountry(c[idx.reporter]);
       const partner = normalizeCountry(c[idx.partner]);
@@ -133,9 +178,9 @@ export async function processBulkFile(file, { source = path.basename(file) } = {
       const flow = c[idx.flow] === '1' ? 'import' : c[idx.flow] === '2' ? 'export' : null;
       if (!flow) { reject(`flux invalide (${c[idx.flow]})`, line); continue; }
       const period = c[idx.period];
+      if (!/^\d{6}$/.test(period)) { reject(`période invalide (${period})`, line); continue; }
       const m = Number(period.slice(4, 6));
       const y = Number(period.slice(0, 4));
-      if (!/^\d{6}$/.test(period)) { reject(`période invalide (${period})`, line); continue; }
       if (m === 52) { stats.annual += 1; continue; } // total annuel publié à part
       if (m < 1 || m > 12 || y < 1988 || y > new Date().getFullYear()) { reject(`période invalide (${period})`, line); continue; }
       const v = Number(c[idx.value] || 0);
@@ -145,66 +190,89 @@ export async function processBulkFile(file, { source = path.basename(file) } = {
       if (!CHAPTERS[product.slice(0, 2)]) { reject(`chapitre inconnu (${product})`, line); continue; }
       stats.kept += 1;
       stats.months.add(`${y}-${String(m).padStart(2, '0')}`);
-      batch.push({ run, r: reporter, p: partner, c: product, f: flow, y, m: m - 1, v, q });
-      if (batch.length >= 20000) await flush();
+      add(`${reporter}|${partner}|${product}|${flow}|${y}|${m - 1}`, v, q);
     }
-    await flush();
     const code = await exited;
     if (child && code !== 0) throw new Error(`décompression impossible (${childError.trim().split('\n').pop() || `code ${code}`})`);
     if (!idx) throw new Error('fichier vide');
+    onProgress(`lecture terminée : ${stats.lines} lignes, ${index.size} flux à écrire (${elapsed()})`);
 
-    // Agrégation (régimes statistiques additionnés) et fusion mois par mois dans la base
-    const months = '$$new.months';
-    await BulkStaging.aggregate([
-      { $match: { run } },
-      { $group: { _id: { r: '$r', p: '$p', c: '$c', f: '$f', y: '$y', m: '$m' }, v: { $sum: '$v' }, q: { $sum: '$q' } } },
-      { $group: { _id: { r: '$_id.r', p: '$_id.p', c: '$_id.c', f: '$_id.f', y: '$_id.y' }, e: { $push: { m: '$_id.m', v: '$v', q: '$q' } } } },
-      {
-        $project: {
-          _id: 0, reporter: '$_id.r', partner: '$_id.p', product: '$_id.c', year: '$_id.y', flow: '$_id.f',
-          hs6: { $substrBytes: ['$_id.c', 0, 6] }, chapter: { $substrBytes: ['$_id.c', 0, 2] },
-          mi: '$e.m',
-          months: { $map: { input: { $range: [0, 12] }, as: 'i', in: { $sum: { $map: { input: { $filter: { input: '$e', cond: { $eq: ['$$this.m', '$$i'] } } }, in: '$$this.v' } } } } },
-          monthsKg: { $map: { input: { $range: [0, 12] }, as: 'i', in: { $sum: { $map: { input: { $filter: { input: '$e', cond: { $eq: ['$$this.m', '$$i'] } } }, in: '$$this.q' } } } } },
-        },
-      },
-      { $addFields: { section: sectionExpr('$chapter'), source: 'eurostat', valueEur: { $sum: '$months' }, quantityKg: { $sum: '$monthsKg' }, tc: ['$product'] } },
-      {
-        $merge: {
-          into: TradeFlow.collection.name,
-          on: ['reporter', 'partner', 'product', 'year', 'flow'],
-          whenMatched: [
-            {
-              $set: {
-                months: { $map: { input: { $range: [0, 12] }, as: 'i', in: { $cond: [{ $in: ['$$i', '$$new.mi'] }, { $arrayElemAt: [months, '$$i'] }, { $arrayElemAt: [{ $ifNull: ['$months', [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]] }, '$$i'] }] } } },
-                monthsKg: { $map: { input: { $range: [0, 12] }, as: 'i', in: { $cond: [{ $in: ['$$i', '$$new.mi'] }, { $arrayElemAt: ['$$new.monthsKg', '$$i'] }, { $arrayElemAt: [{ $ifNull: ['$monthsKg', [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]] }, '$$i'] }] } } },
-                source: 'eurostat',
-              },
-            },
-            { $set: { valueEur: { $sum: '$months' }, quantityKg: { $sum: '$monthsKg' }, tc: { $ifNull: ['$tc', ['$product']] } } },
-          ],
-          whenNotMatched: 'insert',
-        },
-      },
-    ]).allowDiskUse(true);
-    await TradeFlow.collection.updateMany({ mi: { $exists: true } }, { $unset: { mi: 1 } });
+    // Écriture par lots parallèles (les opérations d'un même fichier sont indépendantes :
+    // chacune ne touche qu'un mois d'une ligne).
+    const coll = TradeFlow.collection;
+    const codes = new Set();
+    const years = new Set();
+    const entries = index.entries();
+    const monthOf = new WeakMap();
+    let written = 0;
+    let updated = 0;
+    let lastReport = 0;
+    const worker = async () => {
+      for (;;) {
+        const docs = [];
+        for (let n = 0; n < batchSize; n++) {
+          const next = entries.next();
+          if (next.done) break;
+          const [key, i] = next.value;
+          const [r, p, c, f, y, m] = key.split('|');
+          codes.add(c);
+          years.add(Number(y));
+          const d = newDoc(r, p, c, f, Number(y), Number(m), Math.round(values[i] * 100) / 100, Math.round(kgs[i] * 100) / 100);
+          monthOf.set(d, Number(m));
+          docs.push(d);
+        }
+        if (!docs.length) return;
+        // Un même lot peut contenir plusieurs mois d'une même ligne : on les sépare en sous-lots
+        const seen = new Map();
+        const rounds = [];
+        for (const d of docs) {
+          const k = `${d.reporter}|${d.partner}|${d.product}|${d.flow}|${d.year}`;
+          const n = seen.get(k) ?? 0;
+          seen.set(k, n + 1);
+          (rounds[n] ??= []).push(d);
+        }
+        for (const part of rounds) {
+          const n = await writeBatch(coll, part, (d) => monthOf.get(d)); // (pas de « += await » : écritures concurrentes)
+          updated += n;
+        }
+        written += docs.length;
+        if (written - lastReport >= 250_000) {
+          lastReport = written;
+          onProgress(`${Math.round((written / index.size) * 100)} % écrit (${elapsed()})`);
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: concurrency }, worker));
+    // Totaux annuels des lignes complétées (un seul passage côté base)
+    if (updated) {
+      onProgress(`recalcul des totaux (${elapsed()})`);
+      await coll.updateMany(
+        { year: { $in: [...years] }, $expr: { $or: [{ $ne: ['$valueEur', { $sum: '$months' }] }, { $ne: ['$quantityKg', { $sum: '$monthsKg' }] }] } },
+        [{ $set: { valueEur: { $sum: '$months' }, quantityKg: { $sum: '$monthsKg' } } }],
+      );
+    }
+    stats.flows = index.size;
+    stats.updated = updated;
 
     // Codes NC apparus dans le fichier mais absents du catalogue
-    const codes = await BulkStaging.distinct('c', { run });
-    const known = new Set((await Product.find({ code: { $in: codes } }, { code: 1 }).lean()).map((p) => p.code));
-    const missing = codes.filter((c) => !known.has(c));
+    const list = [...codes];
+    const known = new Set();
+    for (let i = 0; i < list.length; i += 20000) {
+      for (const p of await Product.find({ code: { $in: list.slice(i, i + 20000) } }, { code: 1 }).lean()) known.add(p.code);
+    }
+    const missing = list.filter((c) => !known.has(c));
     if (missing.length) {
       const labels = new Map((await Nomenclature.find({ code: { $in: missing } }).lean()).map((n) => [n.code, n.label]));
       await Product.insertMany(missing.map((code) => ({
         code, description: labels.get(code) || `Code NC ${code.slice(0, 4)} ${code.slice(4, 6)} ${code.slice(6)}`,
-        chapter: code.slice(0, 2), heading: code.slice(0, 4), section: SECTIONS.find((s) => Number(code.slice(0, 2)) >= s.chapters[0] && Number(code.slice(0, 2)) <= s.chapters[1])?.code || 'XXI',
+        chapter: code.slice(0, 2), heading: code.slice(0, 4), section: sectionOf(code.slice(0, 2)),
       })), { ordered: false }).catch(() => {});
     }
     stats.newCodes = missing.length;
+    onProgress(`écriture terminée (${elapsed()})`);
   } finally {
     rl.close();
     child?.kill();
-    await BulkStaging.deleteMany({ run });
     if (rejectedSamples.length) await Rejected.insertMany(rejectedSamples, { ordered: false }).catch(() => {});
   }
   return { ...stats, months: [...stats.months].sort() };
@@ -291,7 +359,7 @@ export async function syncBulk({ from = config.bulk.from, to, force = false, onP
         onProgress(`${name} : téléchargement`);
         await download(url, dest);
         onProgress(`${name} : chargement`);
-        const stats = await processBulkFile(dest, { source: name });
+        const stats = await processBulkFile(dest, { source: name, onProgress: (m) => onProgress(`${name} : ${m}`) });
         if (!config.bulk.keepFiles) fs.rmSync(dest, { force: true });
         await BulkFile.updateOne({ name }, { $set: { name, period: `${ym.slice(0, 4)}-${ym.slice(4)}`, url, ...info, status: 'processed', processedAt: new Date(), stats, error: null } }, { upsert: true });
         report.processed += 1;

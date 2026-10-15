@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { EU_COUNTRIES, EXTRA_EU_COUNTRIES, ALL_COUNTRIES } from '../data/countries.js';
+import { EU_COUNTRIES, EU_CODES, ALL_COUNTRIES, countryLabel } from '../data/countries.js';
 import { nomenclatureTree } from '../data/nomenclature.js';
 import { TradeFlow } from '../models/TradeFlow.js';
 import { WorldFlow } from '../models/WorldFlow.js';
@@ -10,6 +10,13 @@ import { formatPeriod } from '../services/filters.js';
 import { SOURCES_INFO } from '../connectors/index.js';
 
 const router = Router();
+
+// Pays présents dans les données, y compris ceux absents du référentiel de base (Andorre, Groenland,
+// territoires, codes spéciaux Comext…) : libellé automatique, jamais écartés.
+const KNOWN = new Map(ALL_COUNTRIES.map((c) => [c.code, c]));
+const countriesOf = (codes) => [...new Set(codes)]
+  .map((code) => KNOWN.get(code) || { code, name: countryLabel(code), eu: EU_CODES.has(code), region: 'Autres pays et territoires' })
+  .sort((a, b) => a.name.localeCompare(b.name, 'fr'));
 
 // Référentiels utilisés pour construire les filtres côté client, et fraîcheur des données.
 router.get('/', async (req, res) => {
@@ -32,9 +39,9 @@ router.get('/', async (req, res) => {
     lastPeriod: range.last ? formatPeriod(range.last) : null,
     world: worldRange.first ? { firstPeriod: formatPeriod(worldRange.first), lastPeriod: formatPeriod(worldRange.last) } : null,
     reporters: EU_COUNTRIES.filter(has(new Set(reporters))),
-    partners: EXTRA_EU_COUNTRIES.filter(has(new Set(partners))),
+    partners: countriesOf(partners.filter((c) => !EU_CODES.has(c))),
     // Pays présents dans les données mondiales : sources directes ou reconstitution « miroir »
-    worldCountries: ALL_COUNTRIES.filter((c) => wr.has(c.code)).map((c) => ({
+    worldCountries: countriesOf([...wr.keys()]).map((c) => ({
       ...c,
       sources: wr.get(c.code).sources,
       mirrorOnly: wr.get(c.code).mirror === 1,
