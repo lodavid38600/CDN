@@ -13,6 +13,7 @@ import ChartCard from '../components/ChartCard.vue';
 import RankTable from '../components/RankTable.vue';
 import Sparkline from '../components/Sparkline.vue';
 import PeriodDrawer from '../components/PeriodDrawer.vue';
+import NcHistory from '../components/NcHistory.vue';
 import GranularityPicker from '../components/GranularityPicker.vue';
 import PeriodTable from '../components/PeriodTable.vue';
 import { bestGranularity, GRANULARITY_WORD } from '../lib/granularity.js';
@@ -140,6 +141,8 @@ async function generateReport() {
         </div>
       </div>
 
+      <NcHistory v-if="node.history" :history="node.history" :code="code" :raw="false" />
+
       <div class="card toolbar">
         <div class="field"><span>Période</span><PeriodPicker v-model:from="period.from" v-model:to="period.to" /></div>
         <div class="field"><span>Flux</span>
@@ -167,9 +170,9 @@ async function generateReport() {
           </div>
         </div>
         <div class="tiles">
-          <RouterLink v-for="c in children" :key="c.code" :to="childLink(c)" class="tile">
+          <RouterLink v-for="c in children" :key="c.code" :to="childLink(c)" class="tile" :class="{ old: c.obsolete }" :title="c.obsolete ? `Ancien code${c.validTo ? ` (jusqu'en ${c.validTo})` : ''} : ses données sont converties vers les codes actuels` : c.label">
             <div class="t-top">
-              <span class="t-code nc">{{ ncCode(c.code) }}</span>
+              <span class="t-code nc">{{ ncCode(c.code) }} <span v-if="c.obsolete" class="badge">ancien code</span></span>
               <Sparkline v-if="childSparks[c.code]" :values="childSparks[c.code]" :width="64" :height="22" />
             </div>
             <div class="t-label">{{ c.label }}</div>
@@ -209,6 +212,7 @@ async function generateReport() {
 .toolbar .field { min-width: 220px; }
 .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
 .tile { display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: 12px; color: var(--text); background: var(--surface); border: 1px solid var(--border); transition: transform 0.12s, border-color 0.12s; }
+.tile.old { opacity: 0.6; border-style: dashed; }
 .tile:hover { text-decoration: none; border-color: var(--accent); transform: translateY(-2px); }
 .t-top { display: flex; justify-content: space-between; align-items: center; }
 .t-code { font-size: 1.15rem; font-weight: 700; color: var(--accent); }

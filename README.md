@@ -9,18 +9,69 @@ entre les **27 pays de l'UE** et les **pays hors UE**, code NC par code NC (nome
 
 ## Fonctionnalités
 
-| Écran | Ce qu'on y fait |
+| Menu | Ce qu'on y fait |
 |---|---|
-| **Tableau de bord** | *Question rapide* en langage naturel (pays, flux, produit, partenaire, mois de début et de fin) ; indicateurs (import, export, solde, couverture, variation sur un an) ; évolution **mensuelle ou annuelle** avec **prévision** ; classements partenaires / pays UE / sections ; **un clic sur une colonne ouvre le détail du mois** (pays avec drapeaux, produits) |
-| **Nomenclature NC** | Grande grille des **chapitres NC02** par section (valeur, part, mini-courbe) → **sous-positions NC06** → **codes NC8** |
-| **Fiche NC8** | Tout ce qu'on peut agréger sur un produit : valeurs, volumes, prix moyen au kg, solde, couverture, croissance annuelle moyenne, poids dans la sous-position, mois de pointe, saisonnalité, évolution des prix, prévision, **carte des partenaires**, classements, matrice *qui commerce avec qui* (déclarants × partenaires) |
-| **Carte du monde** | Tous les pays couverts (UE et hors UE), choroplèthe, survol avec drapeau, **fiche pays** (tendance, contreparties, produits) |
-| **Comparateur** | Jusqu'à **4 jeux de données sur le même graphique** (produit × flux × pays) : dans le temps (avec base 100) ou par pays — ex. *pays UE exportateurs vs importateurs de choux* |
-| **Explorateur** | Lignes détaillées, tri, pagination, profil mensuel, **export CSV** |
-| **Rapports** | **Génération en un clic** depuis le tableau de bord, une fiche NC ou la carte ; ajout de n'importe quel graphique via son menu ⤓ ; **éditeur** (texte riche, indicateurs, tableaux, images, glisser-déposer, sauvegarde automatique) ; **mode présentation** plein écran ; **export PDF et PowerPoint** |
+| **Vue d'ensemble** | Phrase de synthèse générée à partir des filtres (« La France a exporté 244 kt de vins vers les pays hors UE pour 2,23 Md € (9,17 €/kg), de mars 2018 à janvier 2019 ») ; indicateurs en valeur, **volume** et **prix moyen** ; évolution au mois, au trimestre ou à l'année selon la période, avec **prévision** ; clic sur une période → détail avec drapeaux |
+| **Produits (codes NC)** | Grille des chapitres NC02 → sous-positions NC06 → codes NC8 ; fiche complète par code : valeurs, volumes, prix médians par pays, saisonnalité, carte, matrice *qui commerce avec qui* |
+| **Prix & volumes** | Pour un produit : prix moyen, **prix médian pondéré par les volumes**, quartiles, extrêmes, dispersion ; **pays au prix médian le plus bas / le plus haut**, la liste complète triable ; boîtes à moustaches par pays, nuage prix / volume, évolution du prix médian |
+| **Pays partenaires** | Carte et fiche de chaque pays, en valeur, en volume ou en prix moyen |
+| **Marché mondial** | **Tous les pays**, y compris ceux qu'Eurostat ne couvre pas (sources nationales, UN Comtrade, reconstitution miroir) ; premiers exportateurs / importateurs mondiaux, part de l'UE, **comparaison miroir** des déclarations |
+| **Comparer** | Jusqu'à 4 jeux de données sur le même graphique (temps ou pays, base 100, valeur / volume / prix) |
+| **Lignes détaillées** | Toutes les déclarations, prix unitaire, conversion des anciens codes visible, export CSV |
+| **Rapports** | Générés en un clic depuis chaque vue, éditables, mode présentation, export **PDF** et **PowerPoint** |
+| **Compte & données** | Fraîcheur des données, journal des mises à jour, codes NC remplacés, quarantaine, sources |
 
-Chaque graphique s'exporte en **PNG** ou **CSV**, bascule en **vue tableau**, et peut être ajouté à un rapport.
-Les filtres sont synchronisés dans l'URL (liens partageables). Thème clair / sombre, interface responsive.
+Les volumes s'affichent dans l'unité adaptée (kg, t, kt, Mt). Une seule bascule « Valeur € / Volume / Prix €/kg »
+pilote les indicateurs, graphiques et classements.
+
+## Évolution de la nomenclature : automatique
+
+Les codes NC changent chaque année (scissions, fusions, renommages, codes réutilisés). L'outil s'adapte seul :
+
+1. **Tables de correspondance** officielles lues dans `server/data/correspondances/` (format décrit dans
+   `LISEZMOI.md` du dossier) et téléchargées automatiquement si `NC_CORRESPONDENCE_URLS` est renseignée.
+2. **Liens déduits** quand une table manque : un code qui disparaît, remplacé l'année suivante par de
+   nouveaux codes de la même position, est relié à eux (signalé « correspondance déduite »).
+3. **Pondération par les volumes** : la répartition d'un ancien code entre ses successeurs est estimée sur
+   les flux observés l'année du changement (valeur et quantité séparément, par flux).
+4. **Conversion vers la nomenclature actuelle** : chaque ligne porte les codes actuels qu'elle couvre et ses
+   facteurs. Résultat :
+   - un code créé en 2022 affiche une **série continue** depuis 2015 (historique reconstitué) ;
+   - un code supprimé affiche **ce qu'il est devenu** (sa part dans les nouveaux codes) ;
+   - aucune double comptabilisation : la somme des codes actuels est **exactement** égale au total déclaré ;
+   - un code réutilisé pour un autre produit n'est pas mélangé avec son ancien usage ;
+   - les déclarations tardives sous un code supprimé sont rattachées à ses successeurs.
+5. Les pages produit l'indiquent par un bandeau (« Code créé en 2022… ») ; la case « Codes déclarés »
+   affiche les chiffres bruts. Côté API : `nc=brut`.
+
+## Données hors Eurostat
+
+| Source | Pays | Niveau | Clé |
+|---|---|---|---|
+| UN Comtrade (`comtrade`) | ~200 pays | SH6, mensuel, USD | `COMTRADE_API_KEY` (gratuite) |
+| US Census Bureau (`us-census`) | États-Unis | SH6, mensuel, USD | — |
+| HMRC UK Trade Info (`uk-hmrc`) | Royaume-Uni | 8 chiffres, mensuel, GBP | — |
+| Statistisk sentralbyrå (`ssb`) | Norvège | SH8, mensuel, NOK | — |
+
+Harmonisation automatique : codes ramenés au **SH6** (commun à tous les pays) puis convertis vers la version
+actuelle du Système harmonisé, devises converties en euros au **taux mensuel BCE** (repli sur la moyenne
+annuelle), pays en codes ISO. Les pays qui ne publient pas (Chine, Viêt Nam…) sont **reconstitués en miroir** à
+partir des déclarations de leurs partenaires. Priorité : source nationale / Eurostat > Comtrade > miroir —
+une source moins fiable n'écrase jamais une source plus fiable.
+
+## Données toujours à jour et incassables
+
+- **Mise à jour automatique** (`AUTO_UPDATE=true`) : toutes les `UPDATE_INTERVAL_HOURS` heures, ré-import des
+  `UPDATE_MONTHS` derniers mois (révisions comprises), sources mondiales (`WORLD_SOURCES=us-census,uk-hmrc,ssb,comtrade`),
+  tables de correspondance, synchronisation de la nomenclature. Verrou distribué (une seule exécution à la fois),
+  journal consultable, une étape en échec n'empêche pas les autres.
+- **Contrôles de qualité** à l'entrée : codes, pays, flux, années, mois (12 valeurs, positives, pas dans le futur),
+  cohérence des totaux (recalculés depuis les mois) ; toute ligne invalide part en **quarantaine** (90 jours) au
+  lieu d'être insérée ; prix unitaires aberrants signalés et exclus des statistiques de prix.
+- **Fusion mois par mois** : un import partiel ne remet jamais à zéro les autres mois.
+- **Version des données** : chaque import incrémente une version qui invalide immédiatement les caches de
+  toutes les instances.
+- Commandes : `npm run update` (mise à jour complète), `npm run nc:sync` (nomenclature seule).
 
 ## Architecture
 
@@ -29,12 +80,16 @@ Les filtres sont synchronisés dans l'URL (liens partageables). Thème clair / s
 ├── server/                       API Express + Mongoose
 │   ├── src/
 │   │   ├── app.js                routes, sécurité (helmet, rate-limit, CORS), cache des statistiques
-│   │   ├── models/               User, Product (NC8), Nomenclature (NC02/04/06/08), TradeFlow, Report
+│   │   ├── models/               User, Product, Nomenclature, TradeFlow (UE, NC8), WorldFlow (monde, SH6),
+│   │   │                         NcLink (correspondances), Report, Meta / Rejected / JobRun / Lock / FxRate
 │   │   ├── routes/               auth, meta, stats, trade, products, nomenclature, reports
-│   │   ├── services/             filtres (périodes au mois), prévisions, JSON-stat Eurostat, libellés
+│   │   ├── services/             nomenclature (ncGraph, ncSync, scope), qualité, ingestion, prix, prévisions,
+│   │   │                         jeu mondial, mise à jour planifiée, verrou, version des données
+│   │   ├── connectors/           Comtrade, US Census, HMRC, SSB, taux BCE
 │   │   ├── data/                 sections et chapitres NC, pays, catalogue de démonstration
 │   │   └── scripts/              seed (démo) et importEurostat (données réelles)
-│   └── test/                     tests node:test (unitaires + intégration MongoDB)
+│   ├── data/correspondances/     tables de correspondance NC (CSV)
+│   └── test/                     tests node:test (unitaires, intégration, robustesse)
 ├── client/                       Vue 3 + Vite + Vue Router + Pinia + Chart.js + d3-geo
 │   └── src/
 │       ├── views/                Tableau de bord, Nomenclature, NC, Fiche produit, Carte,
@@ -63,7 +118,8 @@ cp server/.env.example server/.env        # ajustez MONGO_URL / JWT_SECRET
 
 docker run -d -p 27017:27017 --name mongo mongo:7   # si MongoDB n'est pas installé
 
-npm run seed            # 109 codes NC réels, janv. 2015 → juin 2026, valeurs mensuelles simulées
+npm run seed            # codes NC réels (dont 3 changements de nomenclature réels), janv. 2015 → juin 2026,
+                        # valeurs simulées UE + 13 pays hors UE ; synchronisation NC et jeu mondial (~2 min)
 npm run dev:server      # API sur http://localhost:4000
 npm run dev:client      # interface sur http://localhost:5173
 ```
@@ -90,16 +146,13 @@ Pour charger les données officielles, le script interroge l'API de diffusion Co
 
 ```bash
 # codes NC précis, tous les pays UE, partenaires hors UE de référence
-npm run import:eurostat -- --products 22042109,87032319,30049000 --years 2019-2024
+npm run import:eurostat -- --products 22042109,87032319,30049000 --from 2019-01 --to 2024-12
 
 # périmètre restreint
-npm run import:eurostat -- --products 22042109 --reporters FR,IT,ES --partners US,CN,GB --years 2023
-
-# données annuelles seulement
-npm run import:eurostat -- --products 22042109 --years 2015-2024 --freq A
+npm run import:eurostat -- --products 22042109 --reporters FR,IT,ES --partners US,CN,GB --from 2023-01
 
 # rafraîchir tous les codes NC déjà présents en base
-npm run import:eurostat -- --from-db --years 2024
+npm run import:eurostat -- --from-db --from 2024-01
 ```
 
 - Les flux `1`/`2` deviennent `import`/`export` ; les indicateurs `VALUE_IN_EUROS` et
@@ -128,11 +181,15 @@ Toutes les routes (sauf `/api/auth/*` et `/api/health`) exigent `Authorization: 
 | GET | `/api/stats/top?dimension=partner\|reporter\|product\|hs6\|chapter\|section` | Classement |
 | GET | `/api/stats/sparklines?dimension=` | Séries annuelles par élément (mini-courbes) |
 | GET | `/api/stats/matrix?rows=reporter&cols=partner&size=8` | Matrice croisée |
+| GET | `/api/stats/prices?product=&flow=&dimension=reporter\|partner` | Prix moyen, médian pondéré, quartiles, extrêmes par pays ; évolution |
+| GET | `/api/stats/mirror?product=&reporters=FR&partners=US` | Déclarations croisées exportateur / importateur |
+| GET | `/api/admin/status`, `POST /api/admin/update` | État des données, mise à jour manuelle (administrateurs) |
 | GET | `/api/nomenclature`, `/api/nomenclature/:code` | Arborescence ; nœud NC02 / NC06 / NC08 avec parents et enfants |
 | GET | `/api/trade`, `/api/trade/export.csv` | Lignes détaillées ; export CSV (1 000 lignes Gratuit, 100 000 Pro) |
 | GET | `/api/products?q=`, `/api/products/:code` | Recherche ; fiche d'un code NC8 |
 | GET/POST/PUT/DELETE | `/api/reports`, `/api/reports/:id`, `POST /api/reports/:id/blocks` | Rapports de l'utilisateur |
 
+Toutes les routes statistiques acceptent `source=world` (données mondiales SH6) et `nc=brut` (codes tels que déclarés).
 Filtres communs : `periodFrom` / `periodTo` (`AAAA-MM`), ou `yearFrom` / `yearTo` / `year` ;
 `flow=import|export` ; `reporters=FR,DE` ; `partners=US,CN` ; `sections=IV,XVI` ; `chapters=22,84` ;
 `product=2204` (préfixe de 2 à 8 chiffres). Chaque valeur est validée par liste blanche.
@@ -140,5 +197,7 @@ Filtres communs : `periodFrom` / `periodTo` (`AAAA-MM`), ou `yearFrom` / `yearTo
 ## Tests
 
 ```bash
-npm test     # filtres et périodes, prévisions, parseur JSON-stat, intégration API (si MongoDB est joignable)
+npm test     # 63 tests : nomenclature (scissions, fusions, chaînes, réutilisations, permutations, conservation
+             # de la masse, liens déduits), qualité (lignes corrompues), fusion partielle, priorité des sources,
+             # devises, miroirs, connecteurs, verrou, mise à jour en échec partiel, API
 ```

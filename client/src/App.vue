@@ -4,9 +4,12 @@ import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from './stores/auth.js';
 import { useUiStore } from './stores/ui.js';
 import AddToReportModal from './components/AddToReportModal.vue';
+import { useMetaStore } from './stores/meta.js';
+import { periodLabel } from './format.js';
 
 const auth = useAuthStore();
 const ui = useUiStore();
+const meta = useMetaStore();
 const route = useRoute();
 const router = useRouter();
 const menuOpen = ref(false);
@@ -29,7 +32,10 @@ onMounted(() => {
   let saved = 'auto';
   try { saved = localStorage.getItem(THEME_KEY) || 'auto'; } catch { /* ignoré */ }
   applyTheme(saved);
-  if (auth.isAuthenticated) auth.fetchMe().catch(() => {});
+  if (auth.isAuthenticated) {
+    auth.fetchMe().catch(() => {});
+    meta.load().catch(() => {});
+  }
 });
 
 function logout() {
@@ -39,20 +45,22 @@ function logout() {
 
 const groups = [
   {
-    title: 'Analyser',
+    title: 'Analyse',
     links: [
-      { to: '/', label: 'Tableau de bord', icon: 'M3 13h8V3H3zm0 8h8v-6H3zm10 0h8V11h-8zm0-18v6h8V3z' },
-      { to: '/nomenclature', label: 'Nomenclature NC', icon: 'M4 4h7v7H4zm9 0h7v7h-7zM4 13h7v7H4zm9 0h7v7h-7z' },
-      { to: '/carte', label: 'Carte du monde', icon: 'M15 5.1 9 3 3 5v16l6-2 6 2 6-2V3zM15 19l-6-2V5l6 2z' },
-      { to: '/comparateur', label: 'Comparateur', icon: 'M10 3H4v18h6zm10 6h-6v12h6z' },
-      { to: '/explorer', label: 'Explorateur', icon: 'M3 5h18v2H3zm0 6h18v2H3zm0 6h18v2H3z' },
+      { to: '/', label: "Vue d'ensemble", hint: 'Commerce UE ↔ hors UE : chiffres clés, tendances, prévisions', icon: 'M3 13h8V3H3zm0 8h8v-6H3zm10 0h8V11h-8zm0-18v6h8V3z' },
+      { to: '/nomenclature', label: 'Produits (codes NC)', hint: 'Parcourir les chapitres, sous-positions et codes à 8 chiffres', icon: 'M4 4h7v7H4zm9 0h7v7h-7zM4 13h7v7H4zm9 0h7v7h-7z' },
+      { to: '/prix', label: 'Prix & volumes', hint: 'Prix moyen, médian, fourchettes et volumes par pays', icon: 'M12 2 3 7v2h18V7zM5 11v7h3v-7zm5 0v7h4v-7zm6 0v7h3v-7zM3 20h18v2H3z' },
+      { to: '/carte', label: 'Pays partenaires', hint: 'Carte et fiche de chaque pays', icon: 'M15 5.1 9 3 3 5v16l6-2 6 2 6-2V3zM15 19l-6-2V5l6 2z' },
+      { to: '/monde', label: 'Marché mondial', hint: 'Tous les pays, y compris hors UE (sources nationales, ONU, miroirs)', icon: 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm6.9 6h-2.9a15.6 15.6 0 0 0-1.4-3.6A8 8 0 0 1 18.9 8zM12 4c.8 1.2 1.5 2.5 1.9 4h-3.8c.4-1.5 1.1-2.8 1.9-4zM4.3 14a8 8 0 0 1 0-4h3.4a16 16 0 0 0 0 4zm.8 2h2.9c.3 1.3.8 2.5 1.4 3.6A8 8 0 0 1 5.1 16zM8 8H5.1a8 8 0 0 1 4.3-3.6C8.8 5.5 8.3 6.7 8 8zm4 12c-.8-1.2-1.5-2.5-1.9-4h3.8c-.4 1.5-1.1 2.8-1.9 4zm2.3-6H9.7a14 14 0 0 1 0-4h4.6a14 14 0 0 1 0 4zm.3 5.6c.6-1.1 1.1-2.3 1.4-3.6h2.9a8 8 0 0 1-4.3 3.6zm1.7-5.6a16 16 0 0 0 0-4h3.4a8 8 0 0 1 0 4z' },
+      { to: '/comparateur', label: 'Comparer', hint: 'Superposer jusqu\'à 4 jeux de données', icon: 'M10 3H4v18h6zm10 6h-6v12h6z' },
+      { to: '/explorer', label: 'Lignes détaillées', hint: 'Toutes les déclarations, export CSV', icon: 'M3 5h18v2H3zm0 6h18v2H3zm0 6h18v2H3z' },
     ],
   },
   {
-    title: 'Partager',
+    title: 'Restitution',
     links: [
-      { to: '/rapports', label: 'Rapports', icon: 'M6 2h9l5 5v15H6zm8 1.5V8h4.5zM9 12h8v1.5H9zm0 3h8v1.5H9zm0 3h5v1.5H9z' },
-      { to: '/compte', label: 'Mon compte', icon: 'M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10zm0 2c-5 0-9 2.5-9 5v3h18v-3c0-2.5-4-5-9-5z' },
+      { to: '/rapports', label: 'Rapports', hint: 'Rapports éditables, PDF et PowerPoint', icon: 'M6 2h9l5 5v15H6zm8 1.5V8h4.5zM9 12h8v1.5H9zm0 3h8v1.5H9zm0 3h5v1.5H9z' },
+      { to: '/compte', label: 'Compte & données', hint: 'Profil, offre, état des données', icon: 'M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10zm0 2c-5 0-9 2.5-9 5v3h18v-3c0-2.5-4-5-9-5z' },
     ],
   },
 ];
@@ -78,12 +86,18 @@ const isActive = (to) => (to === '/' ? route.path === '/' : route.path.startsWit
     <nav class="sidebar" :class="{ open: menuOpen }" @click="menuOpen = false">
       <template v-for="g in groups" :key="g.title">
         <div class="nav-title">{{ g.title }}</div>
-        <RouterLink v-for="l in g.links" :key="l.to" :to="l.to" class="nav-link" :class="{ active: isActive(l.to) }">
+        <RouterLink v-for="l in g.links" :key="l.to" :to="l.to" class="nav-link" :class="{ active: isActive(l.to) }" :title="l.hint">
           <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path :d="l.icon" fill="currentColor" /></svg>
           {{ l.label }}
         </RouterLink>
       </template>
-      <div class="nav-foot hint">Source : Eurostat Comext<br />Nomenclature combinée (NC)</div>
+      <div class="nav-foot hint">
+        <template v-if="meta.lastPeriod">
+          <span class="fresh-dot" aria-hidden="true" />Données jusqu'à <strong>{{ periodLabel(meta.lastPeriod) }}</strong><br />
+          <span v-if="meta.data?.updatedAt">Actualisées le {{ new Date(meta.data.updatedAt).toLocaleDateString('fr-FR') }}</span><br />
+        </template>
+        Eurostat · sources nationales · ONU<br />Nomenclature harmonisée automatiquement
+      </div>
     </nav>
     <main class="content">
       <RouterView />
@@ -115,7 +129,8 @@ const isActive = (to) => (to === '/' ? route.path === '/' : route.path.startsWit
 .burger { display: none; }
 .sidebar { padding: 12px 10px; border-right: 1px solid var(--border); background: var(--surface); display: flex; flex-direction: column; gap: 2px; position: sticky; top: 56px; height: calc(100vh - 56px); overflow-y: auto; }
 .nav-title { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); padding: 14px 12px 4px; font-weight: 600; }
-.nav-foot { margin-top: auto; padding: 12px; }
+.nav-foot { margin-top: auto; padding: 12px; line-height: 1.5; }
+.fresh-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--good); margin-right: 6px; vertical-align: 1px; }
 .toasts { position: fixed; right: 16px; bottom: 16px; z-index: 80; display: grid; gap: 8px; }
 .toast { display: flex; gap: 12px; align-items: center; background: var(--text); color: var(--page); padding: 10px 12px 10px 16px; border-radius: 10px; box-shadow: var(--shadow-pop); font-size: 0.88rem; }
 .toast a { color: var(--page); font-weight: 700; text-decoration: underline; }

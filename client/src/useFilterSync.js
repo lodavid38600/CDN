@@ -50,6 +50,9 @@ export function useFilterSync(load) {
     }
   );
 
+  // La mesure (valeur / volume / prix) ne recharge rien : elle est seulement mémorisée dans l'URL.
+  watch(() => filters.measure, () => router.replace({ query: filters.toQuery() }));
+
   onBeforeUnmount(() => clearTimeout(timer));
 
   return { filters, meta, loading, error, reload: run };

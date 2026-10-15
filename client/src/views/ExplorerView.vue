@@ -1,7 +1,7 @@
 <script setup>
 import { ref, watch } from 'vue';
 import { api } from '../api.js';
-import { eurFull, kg, ncCode, rangeLabel } from '../format.js';
+import { eurFull, tonnes, perKg, ncCode, rangeLabel } from '../format.js';
 import Flag from '../components/Flag.vue';
 import Sparkline from '../components/Sparkline.vue';
 import { useFilterSync } from '../useFilterSync.js';
@@ -60,7 +60,8 @@ const cols = [
   { key: 'product', label: 'Code NC' },
   { key: null, label: 'Désignation' },
   { key: 'valueEur', label: 'Valeur', num: true },
-  { key: 'quantityKg', label: 'Quantité', num: true },
+  { key: 'quantityKg', label: 'Volume', num: true },
+  { key: 'price', label: 'Prix €/kg', num: true },
   { key: null, label: 'Profil mensuel' },
 ];
 </script>
@@ -97,10 +98,14 @@ const cols = [
               <td><span class="dot" :class="`dot-${r.flow}`" />{{ r.flow === 'import' ? 'Import' : 'Export' }}</td>
               <td :title="r.reporterName"><Flag :code="r.reporter" /> {{ r.reporterName }}</td>
               <td :title="r.partnerName"><Flag :code="r.partner" /> {{ r.partnerName }}</td>
-              <td><RouterLink class="nc" :to="`/produits/${r.product}`">{{ ncCode(r.product) }}</RouterLink></td>
+              <td>
+                <RouterLink class="nc" :to="`/produits/${r.product}`">{{ ncCode(r.product) }}</RouterLink>
+                <div v-if="r.currentCodes" class="conv" :title="'Déclaré sous un ancien code ; part convertie vers le code demandé'">→ {{ r.currentCodes.map(ncCode).join(' + ') }}<span v-if="r.share < 0.9999"> · {{ Math.round(r.share * 100) }} %</span></div>
+              </td>
               <td class="desc secondary" :title="r.description">{{ r.description }}</td>
               <td class="num">{{ eurFull(r.valueEur) }}</td>
-              <td class="num">{{ kg(r.quantityKg) }}</td>
+              <td class="num">{{ tonnes(r.quantityKg) }}</td>
+              <td class="num">{{ perKg(r.unitPrice) }}</td>
               <td><Sparkline v-if="r.monthly" :values="r.monthly" :width="80" :height="20" :color="`var(--${r.flow})`" /></td>
             </tr>
             <tr v-if="!result.rows.length && !loading"><td :colspan="cols.length" class="empty">Aucune donnée pour ces filtres</td></tr>
@@ -124,6 +129,7 @@ const cols = [
 </template>
 
 <style scoped>
+.conv { font-size: 0.72rem; color: var(--muted); }
 .desc { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 td { white-space: nowrap; }
 .pager { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 12px; font-size: 0.85rem; }

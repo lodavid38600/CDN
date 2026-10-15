@@ -24,9 +24,11 @@ function tidy(v, bn, mn, k, unit, tonnesMode = false) {
   const a = Math.abs(v || 0);
   const sign = v < 0 ? '−' : '';
   if (tonnesMode) {
+    // Unité adaptée au volume : kg, t, kt, Mt
     if (a >= 1e6) return `${sign}${sig.format(a / 1e6)} Mt`;
     if (a >= 1e3) return `${sign}${sig.format(a / 1e3)} kt`;
-    return `${sign}${sig.format(a)} t`;
+    if (a >= 1) return `${sign}${sig.format(a)} t`;
+    return `${sign}${full.format(a * 1000)} kg`;
   }
   if (a >= 1e9) return `${sign}${sig.format(a / 1e9)} ${bn}`;
   if (a >= 1e6) return `${sign}${sig.format(a / 1e6)} ${mn}`;
@@ -60,7 +62,8 @@ export function rangeLabel(from, to) {
 }
 
 /** Valeur selon la mesure : 'value' (€) ou 'quantity' (kg). */
-export const fmtMeasure = (measure) => (measure === 'quantity' ? tonnes : eur);
+export const fmtMeasure = (measure) => (measure === 'quantity' ? tonnes : measure === 'price' ? perKg : eur);
+export const MEASURE_LABEL = { value: 'Valeur', quantity: 'Volume', price: 'Prix moyen' };
 
 /** Bornes AAAA-MM d'une période « 2023 », « 2023-T2 » ou « 2023-04 ». */
 export function periodToBounds(p) {

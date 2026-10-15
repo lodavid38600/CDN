@@ -21,7 +21,7 @@ const root = ref(null);
 
 const table = computed(() => specToTable(props.spec));
 const visibleSeries = computed(() => props.spec.series || []);
-const hasData = computed(() => (props.spec.labels || []).length > 0);
+const hasData = computed(() => (props.spec.labels || props.spec.points || []).length > 0);
 
 function exportPng() {
   menuOpen.value = false;

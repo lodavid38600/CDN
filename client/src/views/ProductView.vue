@@ -5,7 +5,10 @@ import { api } from '../api.js';
 import { eur, tonnes, ncCode, perKg, percent, sharePct, rangeLabel, integer } from '../format.js';
 import { useMetaStore } from '../stores/meta.js';
 import { useReportsStore } from '../stores/reports.js';
-import { trendSpec, rankSpec, seasonalitySpec, unitPriceSpec, hbarHeight } from '../lib/specs.js';
+import { trendSpec, rankSpec, seasonalitySpec, unitPriceSpec, hbarHeight, priceBoxSpec } from '../lib/specs.js';
+import { flowKpis } from '../lib/kpis.js';
+import MeasureSwitch from '../components/MeasureSwitch.vue';
+import NcHistory from '../components/NcHistory.vue';
 import { kpiBlock, narrativeBlock, rankTableBlock, sourceBlock } from '../lib/reportBlocks.js';
 import PeriodPicker from '../components/PeriodPicker.vue';
 import MultiSelect from '../components/MultiSelect.vue';
@@ -55,14 +58,17 @@ const granularity = ref('month');
 const chartKind = ref('line');
 const withForecast = ref(true);
 const mapMode = ref('partner');
+const raw = ref(false); // codes tels que déclarés (sans reconstitution de la nomenclature)
+const prices = ref(null);
 
 const params = computed(() => ({
   product: props.code, periodFrom: local.value.from, periodTo: local.value.to,
-  reporters: local.value.reporters, partners: local.value.partners,
+  reporters: local.value.reporters, partners: local.value.partners, nc: raw.value ? 'brut' : undefined,
 }));
 const series = computed(() => ({ month: monthly.value, quarter: quarterly.value, year: annual.value })[granularity.value]);
-const mk = computed(() => (measure.value === 'quantity' ? 'Kg' : 'Eur'));
-const fmt = computed(() => (measure.value === 'quantity' ? tonnes : eur));
+const mk = computed(() => ({ quantity: 'Kg', price: 'Price' })[measure.value] || 'Eur');
+const fmt = computed(() => ({ quantity: tonnes, price: perKg })[measure.value] || eur);
+const kpis = computed(() => flowKpis(summary.value, measure.value));
 const periodText = computed(() => (summary.value?.period ? rangeLabel(summary.value.period.from, summary.value.period.to) : ''));
 const countryOpts = (list) => list.map((c) => ({ value: c.code, label: c.name }));
 
@@ -72,7 +78,7 @@ async function load() {
   try {
     await meta.load();
     const p = params.value;
-    const top = (dimension, limit = 12) => api('/stats/top', { params: { ...p, flow: local.value.flow, dimension, limit, sort: measure.value } });
+    const top = (dimension, limit = 12) => api('/stats/top', { params: { ...p, flow: local.value.flow, dimension, limit, sort: measure.value === 'price' ? 'quantity' : measure.value } });
     const [prod, n, s, hs, m, a, pa, re, mx] = await Promise.all([
       api(`/products/${props.code}`),
       api(`/nomenclature/${props.code}`),
@@ -128,6 +134,17 @@ watch(granularity, async (g) => {
 });
 watch(withForecast, () => loadForecast().catch(() => {}));
 watch(measure, load);
+watch(raw, load);
+// Prix par pays (exportations : pays UE ; importations : fournisseurs hors UE)
+watch(() => [params.value, local.value.flow], async () => {
+  const flow = local.value.flow === 'import' ? 'import' : 'export';
+  prices.value = await api('/stats/prices', { params: { ...params.value, flow, dimension: flow === 'import' ? 'partner' : 'reporter' } }).catch(() => null);
+}, { immediate: true, deep: true });
+const priceBox = computed(() => (prices.value?.groups?.length ? priceBoxSpec({
+  groups: prices.value.groups,
+  title: prices.value.flow === 'import' ? 'Prix à l\'import par pays fournisseur' : 'Prix à l\'export par pays UE',
+  subtitle: `Du moins cher au plus cher · boîte = 50 % des volumes (P25–P75), trait = prix médian · ${periodText.value}`,
+}) : null));
 
 // Indicateurs dérivés
 const unitImport = computed(() => (summary.value?.importKg ? summary.value.importEur / summary.value.importKg : null));
@@ -235,6 +252,8 @@ async function addMapToReport() {
         </div>
       </div>
 
+      <NcHistory v-model:raw="raw" :history="product.history" :code="code" />
+
       <div class="card toolbar">
         <div class="field wide"><span>Période</span><PeriodPicker v-model:from="local.from" v-model:to="local.to" /></div>
         <div class="field"><span>Flux</span>
@@ -247,19 +266,15 @@ async function addMapToReport() {
         <div class="field"><span>Pays UE déclarant</span><MultiSelect v-model="local.reporters" :options="countryOpts(meta.reporters)" placeholder="Toute l'UE" flags /></div>
         <div class="field"><span>Partenaire hors UE</span><MultiSelect v-model="local.partners" :options="countryOpts(meta.partners)" placeholder="Tous" flags /></div>
         <div class="field"><span>Mesure</span>
-          <div class="seg">
-            <button :class="{ on: measure === 'value' }" @click="measure = 'value'">Valeur €</button>
-            <button :class="{ on: measure === 'quantity' }" @click="measure = 'quantity'">Quantité t</button>
-          </div>
+          <MeasureSwitch v-model="measure" />
         </div>
       </div>
 
       <div v-if="summary" class="kpis" :class="{ loading }">
-        <KpiCard dot="import" label="Importations" :value="fmt(summary[`import${mk}`])" :change="measure === 'value' ? summary.changeImport : summary.changeImportKg" change-label="sur un an" :spark="monthly.slice(-24).map((r) => r[`import${mk}`])" spark-color="var(--import)" />
-        <KpiCard dot="export" label="Exportations" :value="fmt(summary[`export${mk}`])" :change="measure === 'value' ? summary.changeExport : summary.changeExportKg" change-label="sur un an" :spark="monthly.slice(-24).map((r) => r[`export${mk}`])" spark-color="var(--export)" />
+        <KpiCard v-for="k in kpis" :key="k.dot" v-bind="k" :spark="monthly.slice(-24).map((r) => r[`${k.dot}${mk}`])" :spark-color="`var(--${k.dot})`" />
         <KpiCard label="Solde commercial" :value="`${summary.balanceEur >= 0 ? '+' : ''}${eur(summary.balanceEur)}`" :sub="`Couverture ${summary.importEur ? sharePct(summary.exportEur / summary.importEur) : '—'}`" />
-        <KpiCard label="Prix moyen import" :value="perKg(unitImport)" :sub="`${tonnes(summary.importKg)} importées`" />
-        <KpiCard label="Prix moyen export" :value="perKg(unitExport)" :sub="`${tonnes(summary.exportKg)} exportées`" />
+        <KpiCard :label="prices?.flow === 'import' ? 'Prix médian à l\'import' : 'Prix médian à l\'export'" :value="perKg(prices?.overall?.median ?? unitExport)" :extra="prices?.overall ? [`P25–P75 : ${perKg(prices.overall.p25)} – ${perKg(prices.overall.p75)}`] : []" sub="Pondéré par les volumes" />
+        <KpiCard label="Volumes échangés" :value="tonnes(summary.importKg + summary.exportKg)" :extra="[`${tonnes(summary.exportKg)} exportées`, `${tonnes(summary.importKg)} importées`]" />
       </div>
       <div v-if="summary" class="kpis" :class="{ loading }" style="margin-top: 12px">
         <KpiCard :label="`Croissance annuelle moyenne (${cagr?.flow === 'import' ? 'import' : 'export'})`" :value="cagr ? percent(cagr.rate) : '—'" :sub="cagr ? `TCAM ${cagr.from} → ${cagr.to}` : 'Historique insuffisant'" />
@@ -294,6 +309,27 @@ async function addMapToReport() {
       <div class="grid grid-2" style="margin-top: 16px">
         <ChartCard :spec="seasonSpec" :height="240" :loading="loading" />
         <ChartCard :spec="priceSpec" :height="240" :loading="loading" />
+      </div>
+
+      <div v-if="priceBox" class="grid grid-2" style="margin-top: 16px">
+        <ChartCard :spec="priceBox" :height="hbarHeight(Math.min(30, prices.groups.length), 1) + 20" />
+        <section class="card">
+          <div class="card-head">
+            <div><h2>Prix médian le plus bas / le plus haut</h2><p>{{ prices.flow === 'import' ? 'Fournisseurs hors UE' : 'Pays UE exportateurs' }} · pondéré par les volumes</p></div>
+            <RouterLink class="btn btn-sm" :to="{ path: '/prix', query: { product: code, flow: prices.flow, scope: prices.flow === 'import' ? 'partner' : 'eu' } }">Analyse complète →</RouterLink>
+          </div>
+          <h3 class="ext-h">Les moins chers</h3>
+          <ol class="extremes">
+            <li v-for="g in prices.groups.slice(0, 5)" :key="'l' + g.key"><Flag :code="g.key" /> <span>{{ g.label }}</span><strong>{{ perKg(g.median) }}</strong><span class="muted small">{{ tonnes(g.quantityKg) }}</span></li>
+          </ol>
+          <template v-if="prices.groups.length > 5">
+            <h3 class="ext-h">Les plus chers</h3>
+            <ol class="extremes">
+              <li v-for="g in [...prices.groups].reverse().slice(0, Math.min(5, prices.groups.length - 5))" :key="'h' + g.key"><Flag :code="g.key" /> <span>{{ g.label }}</span><strong>{{ perKg(g.median) }}</strong><span class="muted small">{{ tonnes(g.quantityKg) }}</span></li>
+            </ol>
+          </template>
+          <p class="hint" style="margin-top: 10px">Prix moyen global : {{ perKg(prices.overall.mean) }} · médian : {{ perKg(prices.overall.median) }} · {{ prices.overall.observations }} déclarations mensuelles</p>
+        </section>
       </div>
 
       <section class="card" style="margin-top: 16px">
@@ -353,6 +389,10 @@ async function addMapToReport() {
 .fc-toggle { display: inline-flex; gap: 6px; align-items: center; font-size: 0.8rem; color: var(--text-2); }
 .kpi-actions { display: flex; flex-direction: column; justify-content: center; gap: 6px; align-items: flex-start; }
 .scroll { max-height: 420px; overflow-y: auto; }
+.extremes { margin: 0; padding-left: 22px; display: grid; gap: 6px; }
+.extremes li { display: grid; grid-template-columns: auto 1fr auto 80px; gap: 8px; align-items: center; }
+.extremes .small { text-align: right; }
+.ext-h { margin: 10px 0 6px; font-size: 0.76rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
 .insight { display: flex; gap: 12px; align-items: center; margin-top: 16px; background: var(--accent-wash); }
 @media (max-width: 700px) { .wide { grid-column: span 1; } }
 </style>

@@ -1,8 +1,8 @@
 // Fabriques de specs de graphiques à partir des réponses de l'API.
 import { MONTHS_SHORT, periodLabel } from '../format.js';
 
-const mKey = (measure) => (measure === 'quantity' ? 'Kg' : 'Eur');
-const unitOf = (measure) => (measure === 'quantity' ? 'kg' : 'eur');
+export const mKey = (measure) => ({ quantity: 'Kg', price: 'Price' })[measure] || 'Eur';
+export const unitOf = (measure) => ({ quantity: 'kg', price: 'eurkg' })[measure] || 'eur';
 
 /** Libellé d'axe : « mars 2018 » abrégé pour les mois, « 2023 (6 mois) » pour une année partielle. */
 export function axisLabel(row) {
@@ -91,3 +91,35 @@ export function rankSpec({ rows, measure = 'value', flow = '', title, subtitle, 
 
 /** Hauteur adaptée à un graphique en barres horizontales. */
 export const hbarHeight = (n, series = 2) => Math.max(160, n * (series > 1 ? 34 : 24) + 40);
+
+/** Boîtes à moustaches des prix par pays (réponse de /stats/prices). */
+export function priceBoxSpec({ groups, title, subtitle, labelFn = (g) => g.label }) {
+  return {
+    kind: 'box', title, subtitle, unit: 'eurkg', color: 1,
+    labels: groups.map((g) => labelFn(g)),
+    keys: groups.map((g) => g.key),
+    boxes: groups.map((g) => ({ min: g.min, p25: g.p25, median: g.median, p75: g.p75, max: g.max, mean: g.mean })),
+  };
+}
+
+/** Nuage volume / prix médian par pays. */
+export function priceScatterSpec({ groups, title, subtitle, eu = new Set() }) {
+  const maxQ = Math.max(1, ...groups.map((g) => g.quantityKg));
+  return {
+    kind: 'scatter', title, subtitle, unit: 'eurkg', xUnit: 'kg', xLog: true, yLog: false,
+    xLabel: 'Volume échangé', yLabel: 'Prix médian',
+    points: groups.map((g) => ({ x: Math.max(1, g.quantityKg), y: g.median, label: g.label, color: eu.has(g.key) ? 1 : 2, r: 4 + 10 * Math.sqrt(g.quantityKg / maxQ) })),
+  };
+}
+
+/** Évolution du prix médian, de la fourchette P25–P75 et du prix moyen. */
+export function priceTrendSpec({ periods, topSeries = {}, labels = {}, title, subtitle }) {
+  const lab = periods.map((p) => periodLabel(p.period, true));
+  const series = [
+    { name: 'Prix médian', color: 1, values: periods.map((p) => p.median), band: { low: periods.map((p) => p.p25), high: periods.map((p) => p.p75) } },
+    { name: 'Prix moyen', color: 2, values: periods.map((p) => p.mean), dashed: true },
+  ];
+  let c = 3;
+  for (const [k, vals] of Object.entries(topSeries)) series.push({ name: labels[k] || k, color: c++, values: vals, hidden: true });
+  return { kind: 'line', title, subtitle, labels: lab, unit: 'eurkg', series: series.filter((x) => !x.hidden) };
+}

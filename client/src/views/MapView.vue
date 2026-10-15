@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { api } from '../api.js';
-import { eur, tonnes, percent, rangeLabel, ncCode } from '../format.js';
+import { eur, tonnes, perKg, percent, rangeLabel, ncCode } from '../format.js';
 import { useMetaStore } from '../stores/meta.js';
 import { useReportsStore } from '../stores/reports.js';
 import { trendSpec } from '../lib/specs.js';
@@ -12,6 +12,7 @@ import WorldMap from '../components/WorldMap.vue';
 import Flag from '../components/Flag.vue';
 import DataChart from '../components/DataChart.vue';
 import RankTable from '../components/RankTable.vue';
+import MeasureSwitch from '../components/MeasureSwitch.vue';
 
 // Carte de tous les pays couverts : partenaires hors UE et/ou pays UE déclarants.
 const route = useRoute();
@@ -31,14 +32,20 @@ const panel = ref(null);
 const loading = ref(false);
 const error = ref('');
 
-const mk = computed(() => (measure.value === 'quantity' ? 'Kg' : 'Eur'));
-const fmt = computed(() => (measure.value === 'quantity' ? tonnes : eur));
+const mk = computed(() => ({ quantity: 'Kg', price: 'Price' })[measure.value] || 'Eur');
+const fmt = computed(() => ({ quantity: tonnes, price: perKg })[measure.value] || eur);
 const base = computed(() => ({ periodFrom: period.value.from, periodTo: period.value.to, product: product.value }));
 const rows = computed(() => (mode.value === 'partner' ? partners.value : mode.value === 'reporter' ? reporters.value : [...partners.value, ...reporters.value]));
-const valueOf = (r) => (flow.value ? r[`${flow.value}${mk.value}`] : r[`import${mk.value}`] + r[`export${mk.value}`]);
+const valueOf = (r) => {
+  if (measure.value === 'price') {
+    if (flow.value) return r[`${flow.value}Price`] ?? 0;
+    return r.totalKg ? r.totalEur / r.totalKg : 0; // prix moyen tous flux
+  }
+  return flow.value ? r[`${flow.value}${mk.value}`] : r[`import${mk.value}`] + r[`export${mk.value}`];
+};
 const values = computed(() => Object.fromEntries(rows.value.map((r) => [r.key, valueOf(r)])));
 const details = computed(() =>
-  Object.fromEntries(rows.value.map((r) => [r.key, { name: r.label, lines: [`Import : ${fmt.value(r[`import${mk.value}`])}`, `Export : ${fmt.value(r[`export${mk.value}`])}`] }]))
+  Object.fromEntries(rows.value.map((r) => [r.key, { name: r.label, lines: [`Import : ${eur(r.importEur)} · ${tonnes(r.importKg)} · ${perKg(r.importPrice)}`, `Export : ${eur(r.exportEur)} · ${tonnes(r.exportKg)} · ${perKg(r.exportPrice)}`] }]))
 );
 const isEu = (code) => meta.reporters.some((c) => c.code === code);
 const euCodes = computed(() => meta.reporters.map((c) => c.code));
@@ -131,12 +138,7 @@ function addPanel() {
           <button :class="{ on: flow === 'export' }" @click="flow = 'export'">Export</button>
         </div>
       </div>
-      <div class="field"><span>Mesure</span>
-        <div class="seg">
-          <button :class="{ on: measure === 'value' }" @click="measure = 'value'">€</button>
-          <button :class="{ on: measure === 'quantity' }" @click="measure = 'quantity'">Tonnes</button>
-        </div>
-      </div>
+      <div class="field"><span>Mesure</span><MeasureSwitch v-model="measure" /></div>
       <div class="field"><span>Période</span><PeriodPicker v-model:from="period.from" v-model:to="period.to" /></div>
       <div class="field grow"><span>Produit (facultatif)</span><NcSearch v-model="product" /></div>
     </div>

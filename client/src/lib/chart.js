@@ -8,12 +8,12 @@
 //   stacked?: boolean,
 // }
 import {
-  Chart, LineController, BarController, LineElement, PointElement, BarElement,
-  LinearScale, CategoryScale, Tooltip, Filler,
+  Chart, LineController, BarController, ScatterController, LineElement, PointElement, BarElement,
+  LinearScale, LogarithmicScale, CategoryScale, Tooltip, Filler,
 } from 'chart.js';
 import { eur, tonnes, perKg } from '../format.js';
 
-Chart.register(LineController, BarController, LineElement, PointElement, BarElement, LinearScale, CategoryScale, Tooltip, Filler);
+Chart.register(LineController, BarController, ScatterController, LineElement, PointElement, BarElement, LinearScale, LogarithmicScale, CategoryScale, Tooltip, Filler);
 
 const LIGHT = {
   text: '#0b0b0b', text2: '#52514e', muted: '#7a7873', grid: '#e1e0d9', axis: '#c3c2b7', surface: '#fcfcfb',
@@ -39,7 +39,7 @@ export function seriesColor(color, theme) {
 
 export function unitFormatter(unit) {
   if (unit === 'kg') return (v) => tonnes(v);
-  if (unit === 'eurkg') return (v) => perKg(v);
+  if (unit === 'eurkg') return (v) => (v === 0 ? '0 €/kg' : perKg(v));
   if (unit === 'index') return (v) => new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 1 }).format(v);
   if (unit === 'pct') return (v) => `${new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 1 }).format(v)} %`;
   return (v) => eur(v);
@@ -51,8 +51,87 @@ function alpha(hex, a) {
   return `rgba(${parseInt(m[1], 16)}, ${parseInt(m[2], 16)}, ${parseInt(m[3], 16)}, ${a})`;
 }
 
+/** Boîtes à moustaches horizontales : min–max (trait), P25–P75 (boîte), médiane (repère). */
+function boxConfig(spec, theme, { onPick, interactive, fontScale }) {
+  const fmt = unitFormatter(spec.unit);
+  const color = seriesColor(spec.color || 1, theme);
+  const b = spec.boxes || [];
+  const tick = { color: theme.muted, font: { size: 11 * fontScale } };
+  return {
+    type: 'bar',
+    data: {
+      labels: spec.labels,
+      datasets: [
+        { label: 'Min – max', data: b.map((x) => [x.min, x.max]), backgroundColor: alpha(color, 0.28), barPercentage: 0.18, categoryPercentage: 1, grouped: false, borderSkipped: false },
+        { label: 'P25 – P75', data: b.map((x) => [x.p25, x.p75]), backgroundColor: alpha(color, 0.75), borderRadius: 3, barPercentage: 0.62, categoryPercentage: 1, grouped: false, borderSkipped: false },
+        {
+          type: 'line', label: 'Médiane', data: b.map((x) => x.median), showLine: false, indexAxis: 'y',
+          pointStyle: 'line', pointRadius: 9, pointHoverRadius: 11, pointRotation: 90, borderColor: theme.text, borderWidth: 3, backgroundColor: theme.text,
+        },
+      ],
+    },
+    options: {
+      indexAxis: 'y', responsive: interactive, maintainAspectRatio: false, animation: interactive ? { duration: 250 } : false,
+      interaction: { mode: 'index', axis: 'y', intersect: false },
+      onClick: (_, els) => onPick && els.length && onPick(els[0].index),
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          enabled: interactive, backgroundColor: theme.surface, titleColor: theme.text, bodyColor: theme.text, borderColor: theme.axis, borderWidth: 1, padding: 10,
+          filter: (item) => item.datasetIndex === 2,
+          callbacks: {
+            label: (c) => {
+              const x = b[c.dataIndex];
+              return [` Médiane ${fmt(x.median)}`, ` Moyenne ${fmt(x.mean)}`, ` P25 – P75 ${fmt(x.p25)} – ${fmt(x.p75)}`, ` Min – max ${fmt(x.min)} – ${fmt(x.max)}`, ...(x.extra || [])];
+            },
+          },
+        },
+      },
+      scales: {
+        x: { type: spec.log ? 'logarithmic' : 'linear', beginAtZero: false, grid: { color: theme.grid }, border: { display: false }, ticks: { ...tick, callback: (v) => fmt(v), maxTicksLimit: 6 } },
+        y: { grid: { display: false }, border: { color: theme.axis }, ticks: { ...tick, color: theme.text2, autoSkip: false } },
+      },
+    },
+  };
+}
+
+/** Nuage de points (ex. volume en abscisse, prix en ordonnée), échelle log possible. */
+function scatterConfig(spec, theme, { onPick, interactive, fontScale }) {
+  const fx = unitFormatter(spec.xUnit);
+  const fy = unitFormatter(spec.unit);
+  const tick = { color: theme.muted, font: { size: 11 * fontScale } };
+  const pts = spec.points || [];
+  return {
+    type: 'scatter',
+    data: {
+      datasets: [{
+        label: spec.title, data: pts.map((p) => ({ x: p.x, y: p.y })),
+        backgroundColor: pts.map((p) => alpha(seriesColor(p.color || 1, theme), 0.8)), borderColor: theme.surface, borderWidth: 2,
+        pointRadius: pts.map((p) => p.r || 6), pointHoverRadius: pts.map((p) => (p.r || 6) + 3), pointHitRadius: 10,
+      }],
+    },
+    options: {
+      responsive: interactive, maintainAspectRatio: false, animation: interactive ? { duration: 250 } : false,
+      onClick: (_, els) => onPick && els.length && onPick(els[0].index),
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          enabled: interactive, backgroundColor: theme.surface, titleColor: theme.text, bodyColor: theme.text, borderColor: theme.axis, borderWidth: 1, padding: 10,
+          callbacks: { title: (items) => pts[items[0].dataIndex]?.label, label: (c) => [` ${spec.yLabel || 'Prix'} : ${fy(c.parsed.y)}`, ` ${spec.xLabel || 'Volume'} : ${fx(c.parsed.x)}`] },
+        },
+      },
+      scales: {
+        x: { type: spec.xLog ? 'logarithmic' : 'linear', title: { display: Boolean(spec.xLabel), text: spec.xLabel, color: theme.muted }, grid: { color: theme.grid }, border: { display: false }, ticks: { ...tick, callback: (v) => fx(v), maxTicksLimit: 6 } },
+        y: { type: spec.yLog ? 'logarithmic' : 'linear', title: { display: Boolean(spec.yLabel), text: spec.yLabel, color: theme.muted }, grid: { color: theme.grid }, border: { display: false }, ticks: { ...tick, callback: (v) => fy(v), maxTicksLimit: 6 } },
+      },
+    },
+  };
+}
+
 /** Config Chart.js. `onPick(index)` est appelé au clic sur un point / une colonne. */
 export function buildConfig(spec, theme, { onPick, interactive = true, fontScale = 1 } = {}) {
+  if (spec.kind === 'box') return boxConfig(spec, theme, { onPick, interactive, fontScale });
+  if (spec.kind === 'scatter') return scatterConfig(spec, theme, { onPick, interactive, fontScale });
   const fmt = unitFormatter(spec.unit);
   const horizontal = spec.kind === 'hbar';
   const type = spec.kind === 'line' ? 'line' : 'bar';
@@ -160,6 +239,17 @@ export function renderChartImage(spec, { width = 1200, height = 600, scale = 2 }
 /** Tableau (colonnes + lignes) dérivé d'une spec, pour la vue tableau et l'export CSV. */
 export function specToTable(spec) {
   const fmt = unitFormatter(spec.unit);
+  if (spec.kind === 'box') {
+    const b = spec.boxes || [];
+    const cols = ['', 'Min', 'P25', 'Médiane', 'P75', 'Max', 'Moyenne'];
+    const keys = ['min', 'p25', 'median', 'p75', 'max', 'mean'];
+    return { columns: cols, rows: b.map((x, i) => [spec.labels[i], ...keys.map((k) => fmt(x[k]))]), raw: b.map((x, i) => [spec.labels[i], ...keys.map((k) => x[k])]) };
+  }
+  if (spec.kind === 'scatter') {
+    const fx = unitFormatter(spec.xUnit);
+    const pts = spec.points || [];
+    return { columns: ['', spec.xLabel || 'x', spec.yLabel || 'y'], rows: pts.map((p) => [p.label, fx(p.x), fmt(p.y)]), raw: pts.map((p) => [p.label, p.x, p.y]) };
+  }
   const series = (spec.series || []).filter((s) => !s.hidden);
   return {
     columns: ['', ...series.map((s) => s.name)],

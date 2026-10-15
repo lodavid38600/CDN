@@ -58,6 +58,16 @@ const SPECIALISTS = {
   '18010000': ['NL', 'BE', 'DE', 'FR'], '08039010': ['BE', 'NL', 'DE', 'IT'], '85171300': ['NL', 'DE', 'FR', 'IT'],
 };
 
+// Positionnement prix propre à chaque pays et produit (gamme, qualité, mix) : ±35 %,
+// déterministe pour que les analyses de prix restent stables d'un seed à l'autre.
+function hash(str) {
+  let h = 2166136261;
+  for (const ch of str) h = Math.imul(h ^ ch.charCodeAt(0), 16777619);
+  return ((h >>> 0) % 10000) / 10000;
+}
+const priceFactor = (country, product) => 0.7 + 0.7 * hash(`${country}|${product}`);
+const partnerPrice = (country, product) => 0.9 + 0.2 * hash(`p|${country}|${product}`);
+
 // Chocs macro-économiques simplifiés (indice du commerce par année).
 const MACRO = { 2015: 0.86, 2016: 0.87, 2017: 0.92, 2018: 0.96, 2019: 0.97, 2020: 0.87, 2021: 1.0, 2022: 1.16, 2023: 1.08, 2024: 1.06, 2025: 1.08, 2026: 1.1 };
 
@@ -156,7 +166,7 @@ async function main() {
             const noise = 0.85 + rand() * 0.3;
             const annual = baseM * 0.6e6 * share * flowShare * bias * yf * noise;
             if (annual < 12000) continue; // secret statistique / valeurs négligeables
-            const price = pricePerKg * (0.9 + rand() * 0.2) * (MACRO[year] ?? 1);
+            const price = pricePerKg * priceFactor(r.code, code) * partnerPrice(p.code, code) * (0.93 + rand() * 0.14) * (MACRO[year] ?? 1);
             const months = Array(12).fill(0);
             const monthsKg = Array(12).fill(0);
             for (let i = 0; i < nMonths; i++) {
