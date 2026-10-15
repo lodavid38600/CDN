@@ -13,6 +13,7 @@ import { importEurostat, monthRange } from '../services/eurostat.js';
 import { syncNomenclature } from '../services/ncSync.js';
 import { syncWorld } from '../services/worldSync.js';
 import { bumpDataVersion } from '../services/dataVersion.js';
+import { rebuildCubes } from '../services/cubes.js';
 
 const now = new Date();
 const { values: args } = parseArgs({
@@ -42,6 +43,7 @@ async function main() {
   console.log('Nomenclature NC8 :', await syncNomenclature({ level: 8 }));
   console.log('Monde :', await syncWorld());
   console.log('Version des données :', await bumpDataVersion({ lastImport: new Date() }));
+  console.log('Tables de synthèse :', JSON.stringify(await rebuildCubes()));
   await disconnectDb();
 }
 

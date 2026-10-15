@@ -71,7 +71,7 @@ const cols = [
     <div class="page-head">
       <div>
         <h1>Explorateur de données</h1>
-        <p>{{ new Intl.NumberFormat('fr-FR').format(result.total) }} lignes · une ligne = déclarant × partenaire × code NC × année × flux<span v-if="filters.periodFrom || filters.periodTo"> · valeurs limitées aux mois de la période ({{ rangeLabel(filters.periodFrom, filters.periodTo) }})</span></p>
+        <p>{{ new Intl.NumberFormat('fr-FR').format(result.total) }}{{ result.capped ? '+' : '' }} lignes · une ligne = déclarant × partenaire × code NC × année × flux<span v-if="filters.periodFrom || filters.periodTo"> · valeurs limitées aux mois de la période ({{ rangeLabel(filters.periodFrom, filters.periodTo) }})</span></p>
       </div>
       <button class="btn btn-primary" :disabled="exporting || !result.total" @click="exportCsv">
         {{ exporting ? 'Export…' : 'Exporter en CSV' }}

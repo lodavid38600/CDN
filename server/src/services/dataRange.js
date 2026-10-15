@@ -1,5 +1,6 @@
 import { TradeFlow } from '../models/TradeFlow.js';
 import { getDataVersion } from './dataVersion.js';
+import { cubeModel, cubesReady } from './cubes.js';
 
 // Première et dernière période (mois) disponibles par collection, recalculées à chaque
 // nouvelle version des données.
@@ -11,8 +12,12 @@ export function invalidateDataRange() {
 
 export async function getDataRange(Model = TradeFlow) {
   const { version } = await getDataVersion();
-  const hit = cache.get(Model.modelName);
+  // Lignes UE : la table de synthèse par chapitre (quelques centaines de lignes) suffit
+  const useCube = Model === TradeFlow && (await cubesReady());
+  const key = `${Model.modelName}${useCube ? ':cube' : ''}`;
+  const hit = cache.get(key);
   if (hit && hit.version === version) return hit.range;
+  if (useCube) Model = cubeModel('chapter');
   const [minDoc] = await Model.find({}, { year: 1 }).sort({ year: 1 }).limit(1).lean();
   const [maxDoc] = await Model.find({}, { year: 1 }).sort({ year: -1 }).limit(1).lean();
   let range = { first: null, last: null };
@@ -26,6 +31,6 @@ export async function getDataRange(Model = TradeFlow) {
     for (let i = 11; i >= 0; i--) if (await hasMonth(maxDoc.year, i)) { lastM = i + 1; break; }
     range = { first: { y: minDoc.year, m: firstM }, last: { y: maxDoc.year, m: lastM } };
   }
-  cache.set(Model.modelName, { version, range });
+  cache.set(key, { version, range });
   return range;
 }

@@ -8,6 +8,7 @@ import { TradeFlow } from '../models/TradeFlow.js';
 import { WorldFlow } from '../models/WorldFlow.js';
 import { buildMatch, valueStages } from './filters.js';
 import { getNcGraph } from './ncContext.js';
+import { CUBES, CUBE_ORDER, cubeModel, cubesReady } from './cubes.js';
 
 export const SOURCES = { eu: { Model: TradeFlow, level: 8 }, world: { Model: WorldFlow, level: 6 } };
 
@@ -34,13 +35,24 @@ const scaleStage = (fv, fq) => ({
  *   raw: true pour les codes tels que déclarés (pas d'harmonisation)
  *   byProduct: true si l'on regroupe par code produit (ajoute le champ _p = code actuel)
  *   noPeriodSlice: ne pas restreindre les valeurs aux mois de la période
- * @returns {{ Model, match, pre, mode, productField, components? }}
+ *   dims: champs utilisés par les étapes suivantes (regroupement…) ; s'il est fourni, la requête
+ *         peut être servie par une table de synthèse qui contient tous ces champs
+ * @returns {{ Model, match, pre, mode, productField, components?, cube? }}
  */
-export async function buildScope(f, { source = 'eu', omit = [], raw = false, byProduct = false, noPeriodSlice = false } = {}) {
+export async function buildScope(f, { source = 'eu', omit = [], raw = false, byProduct = false, noPeriodSlice = false, dims = null } = {}) {
   const { Model, level } = SOURCES[source] || SOURCES.eu;
   let code = f.product;
   if (code && code.length > level) code = code.slice(0, level);
   const match = buildMatch({ ...f, product: undefined }, { omit });
+
+  // Table de synthèse : mêmes résultats, beaucoup moins de lignes à parcourir
+  const cube = source === 'eu' && !raw && dims ? await pickCube(match, dims, code, level) : null;
+  if (cube) {
+    if (code && cube !== 'product') match.$and = [{ chapter: code }];
+    else if (code) Object.assign(match, currentCodeMatch(code, level));
+    const pre = noPeriodSlice ? [] : valueStages(f);
+    return { Model: cubeModel(cube), match, pre, mode: 'harmonized', level, code, cube, productField: '$product' };
+  }
   const pre = [];
   let mode = 'harmonized';
   let components;
@@ -100,8 +112,23 @@ export async function buildScope(f, { source = 'eu', omit = [], raw = false, byP
   return { Model, match, pre, mode, level, code, components, productField: byProduct ? '$_p' : '$product' };
 }
 
+/** Plus petite table de synthèse capable de servir la requête, ou null (lignes détaillées). */
+async function pickCube(match, dims, code, level) {
+  const used = new Set([...Object.keys(match), ...dims]);
+  for (const cube of CUBE_ORDER) {
+    if (![...used].every((k) => CUBES[cube].fields.has(k))) continue;
+    if (code && cube === 'product') {
+      // Un code supprimé est servi par sa continuation dans les lignes détaillées
+      if (code.length === level && (await getNcGraph(level)).isObsolete(code)) return null;
+    } else if (code && (code.length !== 2 || !CUBES[cube].fields.has('chapter'))) continue;
+    return (await cubesReady()) ? cube : null;
+  }
+  return null;
+}
+
 /** Expression de regroupement pour une dimension (les codes produits suivent la nomenclature actuelle). */
 export function dimensionExpr(dimension, scope) {
+  if (scope.cube && scope.cube !== 'product' && (dimension === 'chapter' || dimension === 'section')) return `$${dimension}`;
   if (dimension === 'product') return scope.productField;
   if (dimension === 'hs6') return { $substrBytes: [scope.productField, 0, 6] };
   if (dimension === 'chapter') return { $substrBytes: [scope.productField, 0, 2] };

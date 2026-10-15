@@ -10,6 +10,7 @@ import { syncNomenclature } from '../services/ncSync.js';
 import { syncWorld } from '../services/worldSync.js';
 import { bumpDataVersion } from '../services/dataVersion.js';
 import { withLock } from '../services/lock.js';
+import { rebuildCubes } from '../services/cubes.js';
 import { Nomenclature } from '../models/Nomenclature.js';
 import { CHAPTERS } from '../data/nomenclature.js';
 
@@ -29,6 +30,8 @@ try {
     report.nc8 = await syncNomenclature({ level: 8 });
     report.world = await syncWorld();
     report.version = await bumpDataVersion({ lastUpdate: new Date(), lastUpdateStatus: report.failed ? 'partial' : 'success' });
+    console.log('Tables de synthèse (affichage rapide)…');
+    report.cubes = await rebuildCubes();
     return report;
   });
   console.log(ran ? JSON.stringify(result, null, 2) : 'Une mise à jour est déjà en cours.');

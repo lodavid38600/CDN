@@ -41,6 +41,19 @@ Une seule page, aucune donnée sur une page séparée :
 Les filtres de la fiche (période, pays, flux, mesure, codes bruts) s'appliquent à toutes les sections.
 Les anciennes adresses `/prix?product=…` et `/monde?product=…` redirigent vers la section de la fiche.
 
+## Rapidité sur des millions de lignes
+
+Les vues générales ne parcourent jamais toutes les lignes détaillées : des **tables de synthèse**
+(par chapitre, par pays déclarant, par partenaire, par pays × chapitre, par code NC) sont reconstruites
+automatiquement après chaque import, et au démarrage du serveur si elles sont absentes ou périmées.
+Chaque requête lit la plus petite table capable d'y répondre exactement ; une table qui ne correspond
+pas à la version des données en cours n'est jamais utilisée (on lit alors les lignes détaillées).
+Un test vérifie que les résultats sont identiques avec et sans ces tables.
+
+Mesuré sur 4,4 millions de lignes (2 ans) : vue d'ensemble 92 s → 0,2 s, grille des chapitres
+41 s → < 0,1 s, carte 7,8 s → < 0,1 s, lignes détaillées 3,5 s → 0,02 s. La reconstruction prend
+environ 3 minutes pour ce volume. Diagnostic : `STATS_CUBES=false` désactive les tables.
+
 ## Évolution de la nomenclature : automatique
 
 Les codes NC changent chaque année (scissions, fusions, renommages, codes réutilisés). L'outil s'adapte seul :

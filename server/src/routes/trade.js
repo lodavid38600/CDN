@@ -11,7 +11,8 @@ const SORTABLE = { year: 'year', valueEur: 'valueEur', quantityKg: 'quantityKg',
 function sortSpec(query) {
   const field = SORTABLE[String(query.sort || 'valueEur')] || 'valueEur';
   const dir = String(query.order || 'desc') === 'asc' ? 1 : -1;
-  return { [field]: dir, _id: 1 };
+  // Départage par _id dans le même sens : le tri suit alors les index { champ: -1, _id: -1 }
+  return { [field]: dir, _id: dir };
 }
 
 const unitPrice = { $addFields: { unitPrice: { $cond: [{ $gt: ['$quantityKg', 0] }, { $divide: ['$valueEur', '$quantityKg'] }, null] } } };
@@ -30,6 +31,22 @@ const lookupProduct = (collection) => [
   },
 ];
 
+const COUNT_CAP = 100000;
+
+/**
+ * Lignes triées : quand aucune étape ne modifie les valeurs (pas de période partielle ni de
+ * conversion), le filtre et le tri passent en tête pour profiter des index (tri par valeur,
+ * année… sans trier toute la table).
+ */
+function sortedRows(s, pre, query, page) {
+  const sort = { $sort: sortSpec(query) };
+  if (s.pre.length || sortSpec(query).unitPrice) return [{ $match: s.match }, ...pre, unitPrice, sort, ...page];
+  // « valeur ou quantité non nulle » écrit sans $or : le tri peut alors suivre l'index
+  const nonZero = { $nor: [{ valueEur: { $lte: 0 }, quantityKg: { $lte: 0 } }] };
+  const match = pre.length ? { $and: [s.match, nonZero] } : s.match;
+  return [{ $match: match }, sort, ...page, unitPrice];
+}
+
 async function rowsPipeline(req) {
   const f = parseFilters(req.query);
   const source = req.query.source === 'world' ? 'world' : 'eu';
@@ -44,12 +61,18 @@ async function rowsPipeline(req) {
 router.get('/', async (req, res) => {
   const { f, s, pre, source } = await rowsPipeline(req);
   const { page, limit, skip } = pagination(req.query);
-  const [total, rows] = await Promise.all([
-    s.Model.aggregate([{ $match: s.match }, ...pre, { $count: 'n' }]).then((r) => r[0]?.n ?? 0),
-    s.Model.aggregate([{ $match: s.match }, ...pre, unitPrice, { $sort: sortSpec(req.query) }, { $skip: skip }, { $limit: limit }, ...lookupProduct(source === 'eu' ? 'products' : 'nomenclatures')]),
+  // Nombre de lignes : instantané sans filtre (estimation), plafonné sinon (affiché « 100 000+ »)
+  const count = !Object.keys(s.match).length && !s.pre.length
+    ? s.Model.estimatedDocumentCount()
+    : s.Model.aggregate([{ $match: s.match }, ...pre, { $limit: COUNT_CAP + 1 }, { $count: 'n' }]).then((r) => r[0]?.n ?? 0);
+  const [counted, rows] = await Promise.all([
+    count,
+    s.Model.aggregate([...sortedRows(s, pre, req.query, [{ $skip: skip }, { $limit: limit }]), ...lookupProduct(source === 'eu' ? 'products' : 'nomenclatures')]),
   ]);
+  const capped = counted > COUNT_CAP;
+  const total = Math.min(counted, COUNT_CAP);
   res.json({
-    page, limit, total, pages: Math.ceil(total / limit), nomenclature: s.mode,
+    page, limit, total, capped, pages: Math.ceil(total / limit), nomenclature: s.mode,
     rows: rows.map(({ months, tc, ...r }) => ({
       ...r,
       share: Math.round(r.share * 10000) / 10000,
@@ -72,7 +95,7 @@ function csvCell(v) {
 router.get('/export.csv', async (req, res) => {
   const { s, pre, source } = await rowsPipeline(req);
   const max = config.exportLimits[req.user.plan] ?? config.exportLimits.free;
-  const cursor = s.Model.aggregate([{ $match: s.match }, ...pre, unitPrice, { $sort: sortSpec(req.query) }, { $limit: max }, ...lookupProduct(source === 'eu' ? 'products' : 'nomenclatures')]).allowDiskUse(true).cursor();
+  const cursor = s.Model.aggregate([...sortedRows(s, pre, req.query, [{ $limit: max }]), ...lookupProduct(source === 'eu' ? 'products' : 'nomenclatures')]).allowDiskUse(true).cursor();
 
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="donnees-douanieres.csv"');

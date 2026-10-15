@@ -61,7 +61,7 @@ async function aggregate(f, opts, stages, scopeOpts = {}) {
 }
 
 async function totals(f, opts) {
-  const [row] = await aggregate(f, opts, [{ $group: { _id: null, ...sumByFlow } }, { $project: { _id: 0 } }]);
+  const [row] = await aggregate(f, opts, [{ $group: { _id: null, ...sumByFlow } }, { $project: { _id: 0 } }], { dims: [] });
   return withBalance(row || {});
 }
 
@@ -87,21 +87,17 @@ router.get('/summary', async (req, res) => {
     totals(cur, opts),
     custom ? null : totals(ref, opts),
     totals(prev, opts),
-    // Comptages : un seul passage, codes NC dépliés (une fusion d'ensembles serait quadratique
-    // sur les milliers de codes réels)
-    aggregate(cur, opts, [
-      { $project: { partner: 1, reporter: 1, tc: { $ifNull: ['$tc', ['$product']] } } },
-      { $unwind: '$tc' },
-      { $group: { _id: '$tc', partners: { $addToSet: '$partner' }, reporters: { $addToSet: '$reporter' } } },
-      { $group: { _id: null, products: { $sum: 1 }, partners: { $push: '$partners' }, reporters: { $push: '$reporters' } } },
-      {
-        $project: {
-          _id: 0, products: 1,
-          partners: { $size: { $reduce: { input: '$partners', initialValue: [], in: { $setUnion: ['$$value', '$$this'] } } } },
-          reporters: { $size: { $reduce: { input: '$reporters', initialValue: [], in: { $setUnion: ['$$value', '$$this'] } } } },
-        },
-      },
-    ], { noPeriodSlice: true }),
+    // Comptages : codes NC (table par produit) et pays (table par pays) séparément
+    Promise.all([
+      aggregate(cur, opts, (sc) => [
+        { $project: { tc: { $ifNull: ['$tc', ['$product']] } } }, { $unwind: '$tc' },
+        // Un ancien code réparti entre plusieurs codes actuels ne compte que pour ceux du périmètre
+        ...(sc.code && sc.mode === 'harmonized' ? [{ $match: { tc: { $regex: `^${sc.code}` } } }] : []),
+        { $group: { _id: '$tc' } }, { $count: 'n' },
+      ], { noPeriodSlice: true, dims: ['tc'] }),
+      aggregate(cur, opts, [{ $group: { _id: '$partner' } }, { $count: 'n' }], { noPeriodSlice: true, dims: ['partner'] }),
+      aggregate(cur, opts, [{ $group: { _id: '$reporter' } }, { $count: 'n' }], { noPeriodSlice: true, dims: ['reporter'] }),
+    ]).then(([p, pa, re]) => [{ products: p[0]?.n ?? 0, partners: pa[0]?.n ?? 0, reporters: re[0]?.n ?? 0 }]),
     buildScope(cur, { ...opts, noPeriodSlice: true }),
   ]);
   const base = refTotals || total;
@@ -134,7 +130,7 @@ async function monthlySeries(f, eff, opts) {
     acc[`v${i}`] = { $sum: { $ifNull: [{ $arrayElemAt: ['$months', i] }, { $divide: ['$valueEur', 12] }] } };
     acc[`q${i}`] = { $sum: { $ifNull: [{ $arrayElemAt: ['$monthsKg', i] }, { $divide: ['$quantityKg', 12] }] } };
   }
-  const rows = await aggregate({ ...f, from: eff.from, to: eff.to }, opts, [{ $group: { _id: { y: '$year', f: '$flow' }, ...acc } }], { noPeriodSlice: true });
+  const rows = await aggregate({ ...f, from: eff.from, to: eff.to }, opts, [{ $group: { _id: { y: '$year', f: '$flow' }, ...acc } }], { noPeriodSlice: true, dims: [] });
   const byKey = new Map();
   for (const r of rows) {
     for (let i = 0; i < 12; i++) {
@@ -157,7 +153,7 @@ async function monthlySeries(f, eff, opts) {
 
 async function annualSeries(f, eff, opts) {
   const cur = { ...f, from: eff.from, to: eff.to };
-  const rows = await aggregate(cur, opts, [{ $group: { _id: '$year', ...sumByFlow } }, { $sort: { _id: 1 } }]);
+  const rows = await aggregate(cur, opts, [{ $group: { _id: '$year', ...sumByFlow } }, { $sort: { _id: 1 } }], { dims: [] });
   const byYear = new Map(rows.map((r) => [r._id, r]));
   const out = [];
   for (let y = eff.from.y; y <= eff.to.y; y++) {
@@ -283,7 +279,7 @@ router.get('/top', async (req, res) => {
     { $sort: { [sortKey]: dir, _id: 1 } },
     { $limit: limit },
     { $project: { _id: 0, key: '$_id', importEur: 1, exportEur: 1, importKg: 1, exportKg: 1 } },
-  ], { byProduct: PRODUCT_DIMS.has(dimension) });
+  ], { byProduct: PRODUCT_DIMS.has(dimension), dims: [dimension] });
   res.json(await labelsFor(rows.map(withBalance), dimension, opts));
 });
 
@@ -299,7 +295,7 @@ router.get('/sparklines', async (req, res) => {
   const flowValue = f.flow ? { $cond: [{ $eq: ['$flow', f.flow] }, field, 0] } : field;
   const rows = await aggregate({ ...f, from: eff.from, to: eff.to }, opts, (s) => [
     { $group: { _id: { k: dimensionExpr(dimension, s), y: '$year' }, v: { $sum: flowValue } } },
-  ], { byProduct: PRODUCT_DIMS.has(dimension), noPeriodSlice: true });
+  ], { byProduct: PRODUCT_DIMS.has(dimension), noPeriodSlice: true, dims: [dimension] });
   const years = [];
   // Années complètes uniquement (une année partielle fausserait la tendance).
   const lastFull = eff.to.m === 12 ? eff.to.y : eff.to.y - 1;
@@ -329,7 +325,7 @@ router.get('/matrix', async (req, res) => {
   const cells = await aggregate(f, opts, (s) => [
     { $group: { _id: { r: dimensionExpr(rowsDim, s), c: dimensionExpr(colsDim, s) }, v: { $sum: value } } },
     { $match: { v: { $gt: 0 } } },
-  ], { byProduct: PRODUCT_DIMS.has(rowsDim) || PRODUCT_DIMS.has(colsDim) });
+  ], { byProduct: PRODUCT_DIMS.has(rowsDim) || PRODUCT_DIMS.has(colsDim), dims: [rowsDim, colsDim] });
   const totalBy = (k) => {
     const m = new Map();
     for (const c of cells) m.set(c._id[k], (m.get(c._id[k]) || 0) + c.v);

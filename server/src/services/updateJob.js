@@ -15,6 +15,7 @@ import { downloadCorrespondences, syncNomenclature } from './ncSync.js';
 import { syncWorld } from './worldSync.js';
 import { bumpDataVersion } from './dataVersion.js';
 import { withLock } from './lock.js';
+import { rebuildCubes } from './cubes.js';
 import { updateWorldSources } from '../connectors/index.js';
 
 export async function runUpdate({ steps = ['correspondences', 'eurostat-bulk', 'eurostat', 'world-sources', 'sync'], now = new Date() } = {}) {
@@ -52,6 +53,8 @@ export async function runUpdate({ steps = ['correspondences', 'eurostat-bulk', '
   });
   await step('sync', async () => ({ nc8: await syncNomenclature({ level: 8 }), world: await syncWorld() }));
   const version = await bumpDataVersion({ lastUpdate: new Date(), lastUpdateStatus: failures ? 'partial' : 'success' });
+  // Tables de synthèse : en cas d'échec, les pages lisent les lignes détaillées (plus lent, jamais faux)
+  report.cubes = await rebuildCubes().catch((e) => ({ ok: false, error: e.message }));
 
   run.status = failures === 0 ? 'success' : failures >= Object.keys(report).length ? 'failed' : 'partial';
   run.endedAt = new Date();

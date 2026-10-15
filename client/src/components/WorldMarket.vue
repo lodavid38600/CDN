@@ -95,7 +95,8 @@ const details = computed(() => Object.fromEntries(rows.value.map((r) => [r.key, 
 }])));
 const rankC = computed(() => rankSpec({ rows: rows.value.slice(0, 15), measure: props.measure, flow: flow.value, title: `Principaux ${flowWord.value} mondiaux`, subtitle: `SH ${ncCode(code6.value)} · ${periodText.value} · tous pays déclarants (hors commerce intra-UE)` }));
 const trendC = computed(() => trendSpec({ rows: series.value, measure: props.measure, title: 'Commerce mondial couvert — évolution annuelle', subtitle: `SH ${ncCode(code6.value)} · somme des déclarations de tous les pays` }));
-const mirrorSpec = computed(() => (mirror.value ? {
+// Pas de déclaration croisée (aucune donnée mondiale pour ce couple) : pas de graphique
+const mirrorSpec = computed(() => (mirror.value?.totals && mirror.value.years?.length ? {
   kind: 'bar', unit: 'eur',
   title: `Exportations de ${meta.countryName(mirror.value.reporter)} vers ${meta.countryName(mirror.value.partner)}, vues des deux côtés`,
   subtitle: 'Les écarts viennent des valorisations (FAB à l\'export, CAF à l\'import), des délais et des devises',

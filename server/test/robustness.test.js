@@ -27,6 +27,10 @@ const { bumpDataVersion } = await import('../src/services/dataVersion.js');
 const { runUpdate } = await import('../src/services/updateJob.js');
 const { config } = await import('../src/config.js');
 const { BulkFile } = await import('../src/models/BulkFile.js');
+const { rebuildCubes, cubesReady } = await import('../src/services/cubes.js');
+const { buildScope } = await import('../src/services/scope.js');
+const { parseFilters } = await import('../src/services/filters.js');
+const { clearStatsCache } = await import('../src/middleware/cache.js');
 const comtrade = await import('../src/connectors/comtrade.js');
 const census = await import('../src/connectors/usCensus.js');
 const hmrc = await import('../src/connectors/ukHmrc.js');
@@ -422,4 +426,53 @@ it('mise à jour : une étape en échec n\'empêche pas les autres, le journal l
     [config.eurostatBaseUrl, config.autoUpdate.eurostat, config.autoUpdate.months] = prevApi;
     await BulkFile.deleteMany({});
   }
+});
+
+it('tables de synthèse : résultats identiques aux lignes détaillées, jamais utilisées périmées', async () => {
+  await bumpDataVersion({ test: 'cubes' });
+  const URLS = [
+    '/api/stats/summary', '/api/stats/summary?reporters=FR', '/api/stats/summary?periodFrom=2022-03&periodTo=2023-02',
+    '/api/stats/timeseries?granularity=month', '/api/stats/timeseries?granularity=year&partners=US',
+    '/api/stats/top?dimension=partner', '/api/stats/top?dimension=reporter&flow=import', '/api/stats/top?dimension=section',
+    '/api/stats/top?dimension=chapter&limit=100', '/api/stats/top?dimension=product&limit=50', '/api/stats/top?dimension=hs6',
+    '/api/stats/top?dimension=partner&product=85', '/api/stats/top?dimension=product&product=8517', '/api/stats/summary?product=85171300',
+    '/api/stats/sparklines?dimension=chapter', '/api/stats/matrix?size=5', '/api/stats/forecast?granularity=month&horizon=6',
+    '/api/meta', // période couverte (premier / dernier mois renseigné)
+  ];
+  const read = async () => {
+    const out = [];
+    for (const u of URLS) {
+      clearStatsCache();
+      const { body } = await request(app).get(u).set(auth()).expect(200);
+      out.push(u === '/api/meta' ? { first: body.firstPeriod, last: body.lastPeriod, years: body.years } : body);
+    }
+    return out;
+  };
+  process.env.STATS_CUBES = 'false';
+  const detailed = await read();
+  delete process.env.STATS_CUBES;
+  const built = await rebuildCubes();
+  assert.equal(built.current, true);
+  assert.ok(built.rows.country > 0 && built.rows.product > 0 && built.rows.chapter > 0);
+  assert.equal(await cubesReady(), true);
+  // La plus petite table capable de répondre est choisie
+  const pick = async (q, dims) => (await buildScope(parseFilters(q), { dims })).cube || 'détail';
+  assert.equal(await pick({}, []), 'chapter');
+  assert.equal(await pick({ reporters: 'FR' }, ['partner']), 'country');
+  assert.equal(await pick({}, ['product']), 'product');
+  assert.equal(await pick({ product: '85171300' }, []), 'product');
+  assert.equal(await pick({ product: '85171200' }, []), 'détail', 'code supprimé : continuation sur les lignes détaillées');
+  assert.equal(await pick({ reporters: 'FR' }, ['product']), 'détail');
+  assert.equal(await pick({}, null), 'détail', 'requête qui ne déclare pas ses champs : lignes détaillées');
+  const fromCubes = await read();
+  const norm = (x) => JSON.parse(JSON.stringify(x, (k, v) => (typeof v === 'number' ? Math.round(v * 1000) / 1000 : v)));
+  URLS.forEach((u, i) => assert.deepEqual(norm(fromCubes[i]), norm(detailed[i]), u));
+
+  // Nouvelle donnée sans reconstruction : les tables sont ignorées, le résultat reste exact
+  const before = (await request(app).get('/api/stats/summary').set(auth())).body.exportEur;
+  await insertFlows([row('85171300', 2023, 'export', 1, { reporter: 'IT', partner: 'NO', n: 1 })]);
+  await bumpDataVersion({ test: 'cubes-stale' });
+  await new Promise((r) => setTimeout(r, 5100)); // lecture de l'état des tables : au plus toutes les 5 s
+  clearStatsCache();
+  assert.equal((await request(app).get('/api/stats/summary').set(auth())).body.exportEur, before + 1);
 });

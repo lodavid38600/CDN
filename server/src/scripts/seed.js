@@ -18,6 +18,7 @@ import { bumpDataVersion } from '../services/dataVersion.js';
 import { ANNUAL_FALLBACK } from '../connectors/fx.js';
 import { CHAPTERS } from '../data/nomenclature.js';
 import { Nomenclature } from '../models/Nomenclature.js';
+import { rebuildCubes } from '../services/cubes.js';
 import { Product } from '../models/Product.js';
 import { TradeFlow } from '../models/TradeFlow.js';
 import { User } from '../models/User.js';
@@ -205,6 +206,7 @@ async function main() {
   const w = await syncWorld();
   console.log(`✔ Miroirs : ${w.mirror.mirroredCountries.join(', ')} ; SH6 : ${w.nc.official} liens`);
   await bumpDataVersion({ lastImport: new Date(), seed: true });
+  console.log('✔ Tables de synthèse :', JSON.stringify(await rebuildCubes()));
 
   const email = 'demo@douane-saas.eu';
   let demo = await User.findOne({ email });

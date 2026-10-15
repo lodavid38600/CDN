@@ -37,5 +37,9 @@ tradeFlowSchema.index({ product: 1, year: 1 });
 tradeFlowSchema.index({ hs6: 1, year: 1 });
 tradeFlowSchema.index({ partner: 1, year: 1 });
 tradeFlowSchema.index({ tc: 1, year: 1 });
+// Lignes détaillées triées (valeur par défaut, volume, année) sans trier toute la table
+tradeFlowSchema.index({ valueEur: -1, _id: -1 });
+tradeFlowSchema.index({ quantityKg: -1, _id: -1 });
+tradeFlowSchema.index({ year: -1, _id: -1 });
 
 export const TradeFlow = mongoose.model('TradeFlow', tradeFlowSchema);

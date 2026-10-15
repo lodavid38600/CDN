@@ -4,6 +4,7 @@ import { connectDb, disconnectDb } from '../db.js';
 import { syncNomenclature } from '../services/ncSync.js';
 import { syncWorld } from '../services/worldSync.js';
 import { bumpDataVersion } from '../services/dataVersion.js';
+import { rebuildCubes } from '../services/cubes.js';
 
 await connectDb();
 try {
@@ -14,6 +15,7 @@ try {
   const world = await syncWorld();
   console.log('Monde :', { ...world, nc: { ...world.nc, orphans: world.nc.orphans.length, rejected: world.nc.rejected.length } });
   console.log('Version des données :', await bumpDataVersion({ lastSync: new Date() }));
+  console.log('Tables de synthèse :', JSON.stringify(await rebuildCubes()));
 } finally {
   await disconnectDb();
 }
