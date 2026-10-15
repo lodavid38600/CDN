@@ -7,6 +7,7 @@ const unitOf = (measure) => (measure === 'quantity' ? 'kg' : 'eur');
 /** Libellé d'axe : « mars 2018 » abrégé pour les mois, « 2023 (6 mois) » pour une année partielle. */
 export function axisLabel(row) {
   if (row.month) return periodLabel(row.period, true);
+  if (row.quarter) return `T${row.quarter} ${row.year}${row.months < 3 ? ` (${row.months} m.)` : ''}`;
   return row.months && row.months < 12 ? `${row.year} (${row.months} m.)` : String(row.year ?? row.period);
 }
 
@@ -17,12 +18,14 @@ export function axisLabel(row) {
 export function trendSpec({ rows: allRows, fc, measure = 'value', kind = 'line', flow = '', title, subtitle }) {
   const k = mKey(measure);
   // La prévision annuelle part de la dernière année complète : l'année partielle est retirée.
-  const rows = fc?.granularity === 'year' ? allRows.filter((r) => !r.months || r.months === 12) : allRows;
+  const full = { year: 12, quarter: 3 }[fc?.granularity];
+  const rows = full ? allRows.filter((r) => !r.months || r.months === full) : allRows;
   // Une prévision n'a de sens que si la série va jusqu'à la dernière donnée disponible.
   if (fc && rows.length && fc.history.length && rows.at(-1).period !== fc.history.at(-1).period) fc = null;
   const n = rows.length;
   const extra = fc?.forecast || [];
-  const labels = [...rows.map(axisLabel), ...extra.map((f) => (f.period.length === 4 ? `${f.period} (prév.)` : `${periodLabel(f.period, true)}`))];
+  const fcLabel = (p) => (p.length === 4 ? `${p} (prév.)` : p.includes('-T') ? `T${p.slice(-1)} ${p.slice(0, 4)} (prév.)` : periodLabel(p, true));
+  const labels = [...rows.map(axisLabel), ...extra.map((f) => fcLabel(f.period))];
   const pad = (arr, len) => [...arr, ...Array(len).fill(null)];
   const series = [];
   for (const f of ['import', 'export']) {

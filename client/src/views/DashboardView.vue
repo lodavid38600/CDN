@@ -13,6 +13,8 @@ import ChartCard from '../components/ChartCard.vue';
 import RankTable from '../components/RankTable.vue';
 import PeriodDrawer from '../components/PeriodDrawer.vue';
 import QuickQuestion from '../components/QuickQuestion.vue';
+import GranularityPicker from '../components/GranularityPicker.vue';
+import { bestGranularity, GRANULARITY_WORD } from '../lib/granularity.js';
 
 const router = useRouter();
 const reports = useReportsStore();
@@ -45,10 +47,14 @@ const { filters, meta, loading, error, reload } = useFilterSync(async (params) =
 
 async function loadForecast(params = filters.params) {
   fc.value = withForecast.value
-    ? await api('/stats/forecast', { params: { ...params, granularity: granularity.value, horizon: granularity.value === 'month' ? 12 : 3, measure: measure.value } })
+    ? await api('/stats/forecast', { params: { ...params, granularity: granularity.value, horizon: { month: 12, quarter: 4, year: 3 }[granularity.value], measure: measure.value } })
     : null;
 }
 watch([granularity], () => reload());
+// Pas de temps adapté à la période choisie (mois, trimestre ou année).
+watch(() => [filters.periodFrom, filters.periodTo, meta.loaded], () => {
+  if (meta.loaded) granularity.value = bestGranularity(filters.periodFrom, filters.periodTo, meta);
+}, { immediate: true });
 watch([withForecast, measure], () => loadForecast().catch(() => {}));
 
 const fmt = computed(() => (measure.value === 'quantity' ? tonnes : eur));
@@ -62,7 +68,7 @@ const sparkExport = computed(() => series.value.slice(-24).map((r) => r[`export$
 const trend = computed(() =>
   trendSpec({
     rows: series.value, fc: chartKind.value === 'line' ? fc.value : null, measure: measure.value, kind: chartKind.value === 'line' ? 'line' : 'bar',
-    title: `Évolution ${granularity.value === 'month' ? 'mensuelle' : 'annuelle'} des échanges`,
+    title: `Évolution ${GRANULARITY_WORD[granularity.value]} des échanges`,
     subtitle: `Importations et exportations extra-UE${measure.value === 'quantity' ? ', en tonnes' : ', en euros courants'} · ${periodText.value}`,
   })
 );
@@ -146,10 +152,7 @@ const filtersDescription = computed(() => {
 
     <ChartCard :spec="trend" :height="320" pickable :loading="loading" @pick="pickPeriod">
       <template #controls>
-        <div class="seg" role="group" aria-label="Granularité">
-          <button :class="{ on: granularity === 'month' }" @click="granularity = 'month'">Mois</button>
-          <button :class="{ on: granularity === 'year' }" @click="granularity = 'year'">Année</button>
-        </div>
+        <GranularityPicker v-model="granularity" :from="filters.periodFrom" :to="filters.periodTo" />
         <div class="seg" role="group" aria-label="Type de graphique">
           <button :class="{ on: chartKind === 'line' }" @click="chartKind = 'line'">Courbes</button>
           <button :class="{ on: chartKind === 'bar' }" @click="chartKind = 'bar'">Colonnes</button>

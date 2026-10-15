@@ -96,6 +96,14 @@ it('timeseries mensuelle et annuelle', async () => {
   assert.deepEqual(y.body.map((r) => [r.year, r.exportEur, r.months]), [[2022, 0, 12], [2023, 60, 12], [2024, 30, 6]]);
 });
 
+it('timeseries trimestrielle et prévision trimestrielle', async () => {
+  const q = await request(app).get('/api/stats/timeseries?granularity=quarter&reporters=IT').set(auth()).expect(200);
+  const last = q.body.slice(-3).map((r) => [r.period, r.exportEur, r.months]);
+  assert.deepEqual(last, [['2023-T4', 15, 3], ['2024-T1', 15, 3], ['2024-T2', 15, 3]]);
+  const fc = await request(app).get('/api/stats/forecast?granularity=quarter&horizon=2').set(auth()).expect(200);
+  assert.deepEqual(fc.body.forecast.map((r) => r.period), ['2024-T3', '2024-T4']);
+});
+
 it('top par NC06 et par partenaire', async () => {
   const top = await request(app).get('/api/stats/top?dimension=partner&flow=export').set(auth()).expect(200);
   assert.deepEqual(top.body.map((r) => [r.key, r.label]), [['US', 'États-Unis'], ['CN', 'Chine']]);

@@ -145,42 +145,71 @@ async function annualSeries(f, eff) {
   return out;
 }
 
-// Évolution import / export, annuelle (granularity=year) ou mensuelle (granularity=month).
+/** Trimestres (« 2023-T2 ») à partir de la série mensuelle ; `months` < 3 signale un trimestre partiel. */
+async function quarterlySeries(f, eff) {
+  const monthly = await monthlySeries(f, eff);
+  const out = [];
+  for (const m of monthly) {
+    const q = Math.ceil(m.month / 3);
+    const key = `${m.year}-T${q}`;
+    let r = out.at(-1);
+    if (!r || r.period !== key) {
+      r = { period: key, year: m.year, quarter: q, months: 0, importEur: 0, exportEur: 0, importKg: 0, exportKg: 0 };
+      out.push(r);
+    }
+    r.months += 1;
+    for (const k of ['importEur', 'exportEur', 'importKg', 'exportKg']) r[k] += m[k];
+  }
+  return out.map(withBalance);
+}
+
+const SERIES = { month: monthlySeries, quarter: quarterlySeries, year: annualSeries };
+const granularityOf = (g) => (SERIES[g] ? g : 'year');
+
+// Évolution import / export : mensuelle, trimestrielle ou annuelle (granularity=month|quarter|year).
 router.get('/timeseries', async (req, res) => {
   const f = parseFilters(req.query);
   const eff = await effectivePeriod(f);
   if (!eff) return res.json([]);
-  const series = req.query.granularity === 'month' ? await monthlySeries(f, eff) : await annualSeries(f, eff);
-  res.json(series);
+  res.json(await SERIES[granularityOf(String(req.query.granularity))](f, eff));
 });
 
 // Prévision import / export (valeur ou quantité) à partir de l'historique filtré.
 router.get('/forecast', async (req, res) => {
   const f = parseFilters(req.query);
-  const monthly = req.query.granularity !== 'year';
-  const horizon = Math.min(monthly ? 36 : 5, Math.max(1, Number.parseInt(req.query.horizon, 10) || (monthly ? 12 : 3)));
+  const g = req.query.granularity ? granularityOf(String(req.query.granularity)) : 'month';
+  const cfg = {
+    month: { season: 12, maxH: 36, defH: 12, full: 1, step: 1 },
+    quarter: { season: 4, maxH: 12, defH: 4, full: 3, step: 3 },
+    year: { season: 1, maxH: 5, defH: 3, full: 12, step: 12 },
+  }[g];
+  const horizon = Math.min(cfg.maxH, Math.max(1, Number.parseInt(req.query.horizon, 10) || cfg.defH));
   const measure = req.query.measure === 'quantity' ? 'Kg' : 'Eur';
   const range = await getDataRange();
   if (!range.first) return res.json({ history: [], forecast: [] });
 
-  // La prévision s'appuie sur tout l'historique disponible (le filtre de période est ignoré).
+  // La prévision s'appuie sur tout l'historique disponible (le filtre de période est ignoré),
+  // en ne gardant que les périodes complètes.
   const eff = { from: range.first, to: range.last, range };
-  let history = monthly ? await monthlySeries(f, eff) : await annualSeries(f, eff);
-  if (!monthly) history = history.filter((r) => r.months === 12); // années complètes seulement
+  let history = await SERIES[g](f, eff);
+  if (g !== 'month') history = history.filter((r) => r.months === cfg.full);
 
-  const imp = forecast(history.map((r) => r[`import${measure}`]), { horizon, season: monthly ? 12 : 1 });
-  const exp = forecast(history.map((r) => r[`export${measure}`]), { horizon, season: monthly ? 12 : 1 });
-  const last = monthly ? range.last : { y: history.at(-1)?.year ?? range.last.y, m: 12 };
+  const imp = forecast(history.map((r) => r[`import${measure}`]), { horizon, season: cfg.season });
+  const exp = forecast(history.map((r) => r[`export${measure}`]), { horizon, season: cfg.season });
+  const lastRow = history.at(-1);
+  // Dernier mois couvert par l'historique retenu
+  const last = g === 'month' ? range.last : g === 'quarter' ? { y: lastRow?.year ?? range.last.y, m: (lastRow?.quarter ?? 4) * 3 } : { y: lastRow?.year ?? range.last.y, m: 12 };
+  const label = (p) => (g === 'month' ? formatPeriod(p) : g === 'quarter' ? `${p.y}-T${Math.ceil(p.m / 3)}` : String(p.y));
   const out = imp.values.map((_, i) => {
-    const p = monthly ? shiftPeriod(last, i + 1) : { y: last.y + i + 1, m: 12 };
+    const p = shiftPeriod(last, (i + 1) * cfg.step);
     return {
-      period: monthly ? formatPeriod(p) : String(p.y),
+      period: label(p),
       import: round(imp.values[i]), importLow: round(imp.lower[i]), importHigh: round(imp.upper[i]),
       export: round(exp.values[i]), exportLow: round(exp.lower[i]), exportHigh: round(exp.upper[i]),
     };
   });
   res.json({
-    granularity: monthly ? 'month' : 'year',
+    granularity: g,
     measure: measure === 'Kg' ? 'quantity' : 'value',
     method: imp.method,
     history: history.map((r) => ({ period: r.period, import: r[`import${measure}`], export: r[`export${measure}`] })),

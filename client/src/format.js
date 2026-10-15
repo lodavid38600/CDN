@@ -40,6 +40,7 @@ export const MONTHS_SHORT = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', '
 /** "2018-03" -> "mars 2018" ; "2018" -> "2018" */
 export function periodLabel(p, short = false) {
   if (!p) return '';
+  if (String(p).includes('-T')) return `${short ? 'T' : `${['1er', '2e', '3e', '4e'][Number(p.slice(-1)) - 1]} trimestre `}${short ? p.slice(-1) : ''} ${p.slice(0, 4)}`.replace(/\s+/g, ' ').trim();
   const [y, m] = String(p).split('-');
   if (!m) return y;
   return `${(short ? MONTHS_SHORT : MONTHS)[Number(m) - 1]} ${y}`;
@@ -60,3 +61,15 @@ export function rangeLabel(from, to) {
 
 /** Valeur selon la mesure : 'value' (€) ou 'quantity' (kg). */
 export const fmtMeasure = (measure) => (measure === 'quantity' ? tonnes : eur);
+
+/** Bornes AAAA-MM d'une période « 2023 », « 2023-T2 » ou « 2023-04 ». */
+export function periodToBounds(p) {
+  if (!p) return null;
+  if (p.length === 4) return { periodFrom: `${p}-01`, periodTo: `${p}-12` };
+  if (p.includes('-T')) {
+    const q = Number(p.slice(-1));
+    const pad = (m) => String(m).padStart(2, '0');
+    return { periodFrom: `${p.slice(0, 4)}-${pad(q * 3 - 2)}`, periodTo: `${p.slice(0, 4)}-${pad(q * 3)}` };
+  }
+  return { periodFrom: p, periodTo: p };
+}

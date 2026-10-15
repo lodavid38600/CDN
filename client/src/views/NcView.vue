@@ -13,6 +13,9 @@ import ChartCard from '../components/ChartCard.vue';
 import RankTable from '../components/RankTable.vue';
 import Sparkline from '../components/Sparkline.vue';
 import PeriodDrawer from '../components/PeriodDrawer.vue';
+import GranularityPicker from '../components/GranularityPicker.vue';
+import PeriodTable from '../components/PeriodTable.vue';
+import { bestGranularity, GRANULARITY_WORD } from '../lib/granularity.js';
 
 // Niveau intermédiaire de navigation : chapitre NC02 (enfants NC06) ou sous-position NC06 (enfants NC08).
 const props = defineProps({ code: { type: String, required: true } });
@@ -31,6 +34,7 @@ const reporters = ref([]);
 const period = ref({ from: '', to: '' });
 const flow = ref('');
 const drawer = ref('');
+const granularity = ref('month');
 const loading = ref(false);
 const error = ref('');
 
@@ -55,8 +59,8 @@ async function load() {
     const [n, s, ts, f, kids, sp, pa, re] = await Promise.all([
       api(`/nomenclature/${props.code}`),
       api('/stats/summary', { params: p }),
-      api('/stats/timeseries', { params: { ...p, granularity: 'month' } }),
-      api('/stats/forecast', { params: { product: props.code, granularity: 'month', horizon: 12 } }),
+      api('/stats/timeseries', { params: { ...p, granularity: granularity.value } }),
+      api('/stats/forecast', { params: { product: props.code, granularity: granularity.value, horizon: { month: 12, quarter: 4, year: 3 }[granularity.value] } }),
       api('/stats/top', { params: { ...p, dimension: childDim.value, limit: 200 } }),
       api('/stats/sparklines', { params: { product: props.code, dimension: childDim.value, flow: flow.value } }),
       api('/stats/top', { params: { ...p, flow: flow.value, dimension: 'partner', limit: 10 } }),
@@ -76,13 +80,18 @@ async function load() {
     loading.value = false;
   }
 }
-watch(() => props.code, load, { immediate: true });
+function fit() {
+  granularity.value = bestGranularity(period.value.from, period.value.to, meta);
+}
+watch(() => props.code, async () => { await meta.load(); fit(); load(); }, { immediate: true });
+watch(() => [period.value.from, period.value.to], fit);
+watch(granularity, load);
 watch([period, flow], load, { deep: true });
 
 const trend = computed(() =>
   trendSpec({
     rows: series.value, fc: fc.value, measure: 'value', flow: flow.value,
-    title: `Évolution mensuelle — NC ${ncCode(props.code)}`,
+    title: `Évolution ${GRANULARITY_WORD[granularity.value]} — NC ${ncCode(props.code)}`,
     subtitle: `${node.value?.label || ''} · ${periodText.value}`,
   })
 );
@@ -174,8 +183,13 @@ async function generateReport() {
       </section>
 
       <ChartCard :spec="trend" :height="300" pickable :loading="loading" @pick="(i) => (drawer = series[i]?.period || '')">
-        <p class="hint" style="margin-top: 8px">💡 Cliquez sur un mois pour le détail par pays.</p>
+        <template #controls><GranularityPicker v-model="granularity" :from="period.from" :to="period.to" /></template>
+        <p class="hint" style="margin-top: 8px">💡 Cliquez sur une période pour le détail par pays.</p>
       </ChartCard>
+
+      <div style="margin-top: 16px">
+        <PeriodTable v-model:granularity="granularity" :params="{ product: code }" :from="period.from" :to="period.to" :title="`NC ${ncCode(code)} — détail de la période`" @pick="(p) => (drawer = p)" />
+      </div>
 
       <div class="grid grid-2" style="margin-top: 16px">
         <ChartCard :spec="partnerSpec" :height="hbarHeight(partners.length, flow ? 1 : 2)" :loading="loading" />

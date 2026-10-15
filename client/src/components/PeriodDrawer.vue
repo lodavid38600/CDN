@@ -1,7 +1,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue';
 import { api } from '../api.js';
-import { eur, tonnes, percent, perKg, periodLabel, ncCode, sharePct } from '../format.js';
+import { eur, tonnes, percent, perKg, periodLabel, ncCode, sharePct, periodToBounds } from '../format.js';
 import { useReportsStore } from '../stores/reports.js';
 import Flag from './Flag.vue';
 
@@ -19,14 +19,10 @@ const loading = ref(false);
 const error = ref('');
 const flowTab = ref('export');
 
-const bounds = computed(() => {
-  if (!props.period) return null;
-  return props.period.length === 4
-    ? { periodFrom: `${props.period}-01`, periodTo: `${props.period}-12` }
-    : { periodFrom: props.period, periodTo: props.period };
-});
+const bounds = computed(() => periodToBounds(props.period));
 const singleProduct = computed(() => (props.params.product || '').length === 8);
 const title = computed(() => (props.period.length === 4 ? `Année ${props.period}` : periodLabel(props.period).replace(/^./, (c) => c.toUpperCase())));
+const isQuarter = computed(() => props.period.includes('-T'));
 
 watch(
   () => [props.period, JSON.stringify(props.params)],
@@ -55,7 +51,12 @@ watch(
 
 const flowKey = computed(() => `${flowTab.value}Eur`);
 const sum = (rows) => rows.reduce((s, r) => s + r[flowKey.value], 0);
-const prevLabel = computed(() => (data.value?.summary.previous ? (props.period.length === 4 ? String(Number(props.period) - 1) : periodLabel(data.value.summary.previous.from)) : ''));
+const prevLabel = computed(() => {
+  if (!data.value?.summary.previous) return '';
+  if (props.period.length === 4) return String(Number(props.period) - 1);
+  if (isQuarter.value) return `T${props.period.slice(-1)} ${Number(props.period.slice(0, 4)) - 1}`;
+  return periodLabel(data.value.summary.previous.from);
+});
 
 function addToReport() {
   const s = data.value.summary;

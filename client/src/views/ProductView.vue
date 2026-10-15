@@ -16,6 +16,9 @@ import Heatmap from '../components/Heatmap.vue';
 import WorldMap from '../components/WorldMap.vue';
 import Flag from '../components/Flag.vue';
 import PeriodDrawer from '../components/PeriodDrawer.vue';
+import GranularityPicker from '../components/GranularityPicker.vue';
+import PeriodTable from '../components/PeriodTable.vue';
+import { bestGranularity, granularities, GRANULARITY_WORD } from '../lib/granularity.js';
 
 // Fiche complète d'un code NC8 : indicateurs, tendances, prévision, saisonnalité,
 // prix unitaires, carte des partenaires, classements et matrice déclarants × partenaires.
@@ -31,6 +34,7 @@ const summary = ref(null);
 const hs6Summary = ref(null);
 const monthly = ref([]);
 const annual = ref([]);
+const quarterly = ref([]);
 const fc = ref(null);
 const partners = ref([]);
 const reporters = ref([]);
@@ -56,7 +60,7 @@ const params = computed(() => ({
   product: props.code, periodFrom: local.value.from, periodTo: local.value.to,
   reporters: local.value.reporters, partners: local.value.partners,
 }));
-const series = computed(() => (granularity.value === 'month' ? monthly.value : annual.value));
+const series = computed(() => ({ month: monthly.value, quarter: quarterly.value, year: annual.value })[granularity.value]);
 const mk = computed(() => (measure.value === 'quantity' ? 'Kg' : 'Eur'));
 const fmt = computed(() => (measure.value === 'quantity' ? tonnes : eur));
 const periodText = computed(() => (summary.value?.period ? rangeLabel(summary.value.period.from, summary.value.period.to) : ''));
@@ -89,6 +93,7 @@ async function load() {
     partners.value = pa;
     reporters.value = re;
     matrix.value = mx;
+    if (granularity.value === 'quarter') await loadQuarterly();
     await loadForecast();
   } catch (e) {
     error.value = e.message;
@@ -96,19 +101,32 @@ async function load() {
     loading.value = false;
   }
 }
+async function loadQuarterly() {
+  quarterly.value = await api('/stats/timeseries', { params: { ...params.value, granularity: 'quarter' } });
+}
+// Granularité adaptée à la période demandée : recalculée à chaque changement de période.
+function fitGranularity() {
+  granularity.value = bestGranularity(local.value.from, local.value.to, meta);
+}
 async function loadForecast() {
   fc.value = withForecast.value
     ? await api('/stats/forecast', {
-        params: { ...params.value, periodFrom: '', periodTo: '', granularity: granularity.value, horizon: granularity.value === 'month' ? 12 : 3, measure: measure.value },
+        params: { ...params.value, periodFrom: '', periodTo: '', granularity: granularity.value, horizon: { month: 12, quarter: 4, year: 3 }[granularity.value], measure: measure.value },
       })
     : null;
 }
-watch(() => props.code, load, { immediate: true });
+watch(() => props.code, async () => { await meta.load(); fitGranularity(); load(); }, { immediate: true });
+watch(() => [local.value.from, local.value.to], fitGranularity);
 watch(() => JSON.stringify(local.value), () => {
   router.replace({ query: Object.fromEntries(Object.entries({ periodFrom: local.value.from, periodTo: local.value.to, reporters: local.value.reporters.join(','), partners: local.value.partners.join(',') }).filter(([, v]) => v)) });
   load();
 });
-watch([granularity, withForecast], () => loadForecast().catch(() => {}));
+watch(granularity, async (g) => {
+  if (!granularities(local.value.from, local.value.to, meta).opts.find((o) => o.id === g)?.enabled) return fitGranularity();
+  if (g === 'quarter') await loadQuarterly().catch(() => {});
+  loadForecast().catch(() => {});
+});
+watch(withForecast, () => loadForecast().catch(() => {}));
 watch(measure, load);
 
 // Indicateurs dérivés
@@ -136,12 +154,12 @@ const trend = computed(() =>
   trendSpec({
     rows: series.value, fc: chartKind.value === 'line' ? fc.value : null, measure: measure.value, flow: local.value.flow,
     kind: chartKind.value === 'line' ? 'line' : 'bar',
-    title: `Évolution ${granularity.value === 'month' ? 'mensuelle' : 'annuelle'} — ${ncCode(props.code)}`,
+    title: `Évolution ${GRANULARITY_WORD[granularity.value]} — ${ncCode(props.code)}`,
     subtitle: `${product.value?.description || ''} · ${periodText.value}`,
   })
 );
 const seasonSpec = computed(() => seasonalitySpec({ rows: monthly.value, measure: measure.value, title: 'Saisonnalité', subtitle: 'Moyenne par mois calendaire sur la période' }));
-const priceSpec = computed(() => unitPriceSpec({ rows: granularity.value === 'month' ? monthly.value : annual.value, title: 'Prix moyen au kilo', subtitle: 'Valeur / quantité, import et export' }));
+const priceSpec = computed(() => unitPriceSpec({ rows: series.value, title: 'Prix moyen au kilo', subtitle: 'Valeur / quantité, import et export' }));
 const partnerSpec = computed(() => rankSpec({ rows: partners.value.slice(0, 12), measure: measure.value, flow: local.value.flow, title: 'Partenaires hors UE', subtitle: `${product.value?.description || ''} · ${periodText.value}` }));
 const reporterSpec = computed(() => rankSpec({ rows: reporters.value.slice(0, 12), measure: measure.value, flow: local.value.flow, title: 'Pays UE déclarants', subtitle: `${product.value?.description || ''} · ${periodText.value}` }));
 
@@ -257,18 +275,20 @@ async function addMapToReport() {
       <div style="margin-top: 16px">
         <ChartCard :spec="trend" :height="320" pickable :loading="loading" @pick="(i) => (drawer = series[i]?.period || '')">
           <template #controls>
-            <div class="seg">
-              <button :class="{ on: granularity === 'month' }" @click="granularity = 'month'">Mois</button>
-              <button :class="{ on: granularity === 'year' }" @click="granularity = 'year'">Année</button>
-            </div>
+            <GranularityPicker v-model="granularity" :from="local.from" :to="local.to" />
             <div class="seg">
               <button :class="{ on: chartKind === 'line' }" @click="chartKind = 'line'">Courbes</button>
               <button :class="{ on: chartKind === 'bar' }" @click="chartKind = 'bar'">Colonnes</button>
             </div>
             <label class="fc-toggle"><input v-model="withForecast" type="checkbox" :disabled="chartKind !== 'line'" /> Prévision</label>
           </template>
-          <p class="hint" style="margin-top: 8px">💡 Cliquez sur une colonne ou un point pour le détail du mois : pays partenaires, déclarants, drapeaux.</p>
+          <p class="hint" style="margin-top: 8px">💡 Cliquez sur une colonne ou un point pour le détail de la période : pays partenaires, déclarants, drapeaux. Le pas de temps (mois, trimestre, année) s'adapte à la période choisie.</p>
         </ChartCard>
+      </div>
+
+      <div style="margin-top: 16px">
+        <PeriodTable v-model:granularity="granularity" :params="{ product: code, reporters: local.reporters, partners: local.partners }" :from="local.from" :to="local.to"
+          :title="`${ncCode(code)} — détail de la période`" @pick="(p) => (drawer = p)" />
       </div>
 
       <div class="grid grid-2" style="margin-top: 16px">
