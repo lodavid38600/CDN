@@ -61,7 +61,8 @@ async function startLive() {
   clearTimeout(liveTimer);
   liveLoading.value = !feed.value.length;
   try {
-    const r = await api('/trade/mois', { params: { limit: BUFFER, sort: 'recent' } });
+    // Nouveau tirage pendant que le flux défile : en arrière-plan
+    const r = await api('/trade/mois', { params: { limit: BUFFER, sort: 'recent' }, background: feed.value.length > 0 });
     livePeriod.value = r.window?.to || '';
     const rows = r.rows.map((x) => ({ ...x, uid: uid++ }));
     // Ordre d'apparition aléatoire ; les premières lignes s'affichent tout de suite

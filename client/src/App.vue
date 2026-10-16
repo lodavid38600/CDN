@@ -37,7 +37,7 @@ const preparing = ref(false);
 let prepTimer;
 async function loadHome() {
   try {
-    const h = await api('/home');
+    const h = await api('/home', { background: true });
     banner.value = h.banner;
     preparing.value = h.preparing;
   } catch { /* ignoré */ }
@@ -47,10 +47,14 @@ async function loadHome() {
 // Barre de chargement : n'apparaît que si une requête dure plus de 250 ms (pas de clignotement)
 const busy = ref(false);
 let busyTimer;
-watch(pending, (n) => {
-  clearTimeout(busyTimer);
-  if (n > 0) busyTimer = setTimeout(() => { busy.value = true; }, 250);
-  else busy.value = false;
+watch(pending, (n, before) => {
+  if (n > 0 && !before) {
+    clearTimeout(busyTimer);
+    busyTimer = setTimeout(() => { busy.value = true; }, 250);
+  } else if (n === 0) {
+    clearTimeout(busyTimer);
+    busy.value = false;
+  }
 });
 const unread = ref({ tickets: 0, chat: 0 });
 let timer;
@@ -58,10 +62,10 @@ async function refresh() {
   if (!auth.isAuthenticated || !auth.loaded) return;
   try {
     if (auth.isStaff && auth.can('support.manage')) {
-      const o = await api('/admin/overview');
+      const o = await api('/admin/overview', { background: true });
       unread.value = { tickets: o.tickets, chat: o.unreadChat };
     } else if (auth.company) {
-      unread.value = await api('/support/unread');
+      unread.value = await api('/support/unread', { background: true });
     }
   } catch { /* hors ligne : on réessaiera */ }
 }

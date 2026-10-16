@@ -8,7 +8,7 @@ import { TradeFlow } from '../models/TradeFlow.js';
 import { WorldFlow } from '../models/WorldFlow.js';
 import { buildMatch, valueStages } from './filters.js';
 import { getNcGraph } from './ncContext.js';
-import { CUBES, CUBE_ORDER, cubeModel, cubesUsable } from './cubes.js';
+import { CUBES, CUBE_ORDER, cubeModel, cubesUsable, cubeAvailable } from './cubes.js';
 
 export const SOURCES = { eu: { Model: TradeFlow, level: 8 }, world: { Model: WorldFlow, level: 6 } };
 
@@ -115,13 +115,15 @@ export async function buildScope(f, { source = 'eu', omit = [], raw = false, byP
 /** Plus petite table de synthèse capable de servir la requête, ou null (lignes détaillées). */
 async function pickCube(match, dims, code, level) {
   const used = new Set([...Object.keys(match), ...dims]);
+  if (!(await cubesUsable())) return null;
   for (const cube of CUBE_ORDER) {
     if (![...used].every((k) => CUBES[cube].fields.has(k))) continue;
+    if (!(await cubeAvailable(cube))) continue; // pas encore construite (nouvelle table)
     if (code && cube === 'product') {
       // Un code supprimé est servi par sa continuation dans les lignes détaillées
       if (code.length === level && (await getNcGraph(level)).isObsolete(code)) return null;
     } else if (code && (code.length !== 2 || !CUBES[cube].fields.has('chapter'))) continue;
-    return (await cubesUsable()) ? cube : null;
+    return cube;
   }
   return null;
 }

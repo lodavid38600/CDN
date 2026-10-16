@@ -8,12 +8,12 @@ import ChatBox from '../../components/ChatBox.vue';
 const threads = ref([]);
 const current = ref(null);
 let timer;
-async function load() {
-  threads.value = await api('/admin/chat').catch(() => threads.value);
+async function load(background = true) {
+  threads.value = await api('/admin/chat', { background }).catch(() => threads.value);
   if (!current.value && threads.value.length) current.value = threads.value[0];
 }
 function open(t) { current.value = t; t.unreadStaff = 0; }
-onMounted(() => { load(); timer = setInterval(load, 10000); });
+onMounted(() => { load(false); timer = setInterval(load, 10000); });
 onBeforeUnmount(() => clearInterval(timer));
 </script>
 

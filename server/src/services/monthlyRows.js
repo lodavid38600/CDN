@@ -98,7 +98,8 @@ function recentPlan(info, f, window, sort, dir, skip, limit) {
   for (let k = window.to; ym(k) >= ym(window.from); k = shift(k, -1)) periods.push(ym(k));
   const covered = new Set(info.periods.map((x) => Number(x.replace('-', ''))));
   if (!periods.every((k) => covered.has(k))) return null;
-  const n = info.top[g];
+  const n = info.top?.[g];
+  if (!n) return null; // groupe absent de la table (format précédent)
   const flows = f.flow ? [f.flow] : ['import', 'export'];
   let total = 0;
   let available = 0; // nombre de premières lignes exactes dans l'ordre demandé

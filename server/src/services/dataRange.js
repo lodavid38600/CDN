@@ -1,5 +1,6 @@
 import { TradeFlow } from '../models/TradeFlow.js';
 import { getDataVersion } from './dataVersion.js';
+import { Meta } from '../models/System.js';
 import { cubeModel, cubesUsable, cubeBuiltVersion } from './cubes.js';
 
 // Première et dernière période (mois) disponibles par collection, recalculées à chaque
@@ -24,17 +25,29 @@ async function scanRange(Model, filter = {}) {
     [bounds] = await Model.aggregate([{ $match: filter }, { $group: { _id: null, min: { $min: '$year' }, max: { $max: '$year' } } }]);
   }
   if (!bounds) return { first: null, last: null };
-  // Recherches qui s'arrêtent à la première ligne trouvée : rapides sur des millions de lignes
+  // Recherches qui s'arrêtent à la première ligne trouvée. Un mois vide oblige à relire toute
+  // l'année : on avance depuis janvier et on s'arrête au premier mois vide (une seule relecture).
   const hasMonth = (year, i) => Model.exists({ ...filter, year, [`months.${i}`]: { $gt: 0 } });
   let firstM = 1;
   for (let i = 0; i < 12; i++) if (await hasMonth(bounds.min, i)) { firstM = i + 1; break; }
-  let lastM = 12;
-  for (let i = 11; i >= 0; i--) if (await hasMonth(bounds.max, i)) { lastM = i + 1; break; }
+  let lastM = bounds.max === bounds.min ? firstM : 1;
+  for (let i = lastM; i < 12; i++) { if (!(await hasMonth(bounds.max, i))) break; lastM = i + 1; }
   return { first: { y: bounds.min, m: firstM }, last: { y: bounds.max, m: lastM } };
 }
 
+const pending = new Map();
+
 export async function getDataRange(Model = TradeFlow) {
   const { version } = await getDataVersion();
+  const pk = `${Model.modelName}:${version}`;
+  // Plusieurs pages ouvertes en même temps : un seul calcul
+  if (pending.has(pk)) return pending.get(pk);
+  const p = computeRange(Model, version).finally(() => pending.delete(pk));
+  pending.set(pk, p);
+  return p;
+}
+
+async function computeRange(Model, version) {
   const world = Model.modelName === 'WorldFlow';
   // Lignes UE : la table de synthèse par chapitre (quelques centaines de lignes) suffit
   const useCube = !world && (await cubesUsable());
@@ -52,8 +65,16 @@ export async function getDataRange(Model = TradeFlow) {
       first: firsts.length ? firsts.reduce((a, b) => (key(a) <= key(b) ? a : b)) : null,
       last: lasts.length ? lasts.reduce((a, b) => (key(a) >= key(b) ? a : b)) : null,
     };
+  } else if (useCube) {
+    range = await scanRange(cubeModel('chapter'));
   } else {
-    range = await scanRange(useCube ? cubeModel('chapter') : Model);
+    // Sans tables (première installation) : résultat gardé en base, pas recalculé à chaque démarrage
+    const saved = await Meta.findOne({ key: `periode:${Model.modelName}` }).lean();
+    if (saved?.version === version && saved.info?.range) range = saved.info.range;
+    else {
+      range = await scanRange(Model);
+      await Meta.updateOne({ key: `periode:${Model.modelName}` }, { $set: { version, info: { range } } }, { upsert: true });
+    }
   }
   cache.set(k, { version, range });
   return range;

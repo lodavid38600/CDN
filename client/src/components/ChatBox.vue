@@ -20,7 +20,7 @@ let timer;
 async function load(initial = false) {
   try {
     const last = messages.value.at(-1)?.at;
-    const fresh = await api(props.endpoint, { params: initial || !last ? {} : { after: last } });
+    const fresh = await api(props.endpoint, { params: initial || !last ? {} : { after: last }, background: !initial });
     if (initial) messages.value = fresh;
     else if (fresh.length) messages.value.push(...fresh.filter((m) => !messages.value.some((x) => x._id === m._id)));
     if (initial || fresh.length) { await nextTick(); list.value?.scrollTo({ top: list.value.scrollHeight }); }

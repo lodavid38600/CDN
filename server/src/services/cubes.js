@@ -39,31 +39,54 @@ export function cubeModel(cube) {
   return models[cube];
 }
 
-let state = { version: -1 };
+// Tables d'un format antérieur encore lisibles telles quelles (seules celles qu'elles listent servent)
+const COMPATIBLE_SCHEMAS = new Set([3, SCHEMA]);
+let state = { version: -1, usable: -1, schema: null, available: new Set(), latest: null };
 let readAt = 0;
 
-/** Version des données pour laquelle les tables ont été construites (lue au plus toutes les 5 s). */
-async function cubeVersion() {
+/** État des tables en place (lu au plus toutes les 5 s). */
+async function cubeState() {
   if (Date.now() - readAt > 5000) {
     const doc = await Meta.findOne({ key: 'cubes' }).lean();
-    state = { version: doc?.info?.schema === SCHEMA ? doc.version : -1 };
+    const schema = doc?.info?.schema;
+    const compatible = COMPATIBLE_SCHEMAS.has(schema) && doc.version > 0;
+    state = {
+      version: schema === SCHEMA ? doc.version : -1,
+      usable: compatible ? doc.version : -1,
+      schema,
+      available: new Set(schema === SCHEMA ? Object.keys(CUBES) : compatible ? Object.keys(doc.info.rows || {}) : []),
+      latest: compatible ? doc.info.latest || null : null,
+    };
     readAt = Date.now();
   }
-  return state.version;
+  return state;
+}
+/** Version des données pour laquelle les tables (au format actuel) ont été construites. */
+async function cubeVersion() {
+  return (await cubeState()).version;
 }
 
-/** Version des données des tables en place (-1 si aucune table utilisable). */
-export const cubeBuiltVersion = () => cubeVersion();
+/** Identifiant des tables en place (version des données et format) : clé des caches. */
+export async function cubeBuiltVersion() {
+  const s = await cubeState();
+  return `${s.usable}:${s.schema}`;
+}
+
+/** La table existe-t-elle dans les tables en place (une nouvelle table n'apparaît qu'une fois construite) ? */
+export async function cubeAvailable(cube) {
+  return (await cubeState()).available.has(cube);
+}
 
 /**
- * Tables utilisables : à jour, ou construites pour une version précédente des données pendant
- * leur reconstruction (chiffres du dernier import affichés à la fin de la préparation, plutôt
- * que des pages lentes pendant tout ce temps). STATS_STALE_CUBES=false : jamais de tables périmées.
+ * Tables utilisables : à jour, ou construites pour une version précédente des données (ou dans
+ * le format précédent) pendant leur reconstruction : chiffres du dernier import affichés à la fin
+ * de la préparation, plutôt que des pages lentes pendant tout ce temps.
+ * STATS_STALE_CUBES=false : jamais de tables périmées.
  */
 export async function cubesUsable() {
   if (process.env.STATS_CUBES === 'false') return false;
   if (await cubesReady()) return true;
-  return process.env.STATS_STALE_CUBES !== 'false' && (await cubeVersion()) > 0;
+  return process.env.STATS_STALE_CUBES !== 'false' && (await cubeState()).usable > 0;
 }
 
 /** Vrai si les tables sont à jour pour la version des données en cours. */
@@ -102,7 +125,8 @@ const EXPAND = [
 ];
 
 // Calculs lancés en parallèle (MongoDB n'utilise qu'un cœur par calcul) : par année et par sens.
-const PARALLEL = Math.max(1, Number(process.env.STATS_BUILD_PARALLEL) || 4);
+// 2 par défaut : la base reste disponible pour les utilisateurs pendant la construction
+const PARALLEL = Math.max(1, Number(process.env.STATS_BUILD_PARALLEL) || 2);
 
 async function inParallel(items, n, fn) {
   const queue = [...items];
@@ -279,11 +303,15 @@ export const buildRecentTable = buildLatest;
 /** Clé du nombre de déclarations d'un mois (AAAAMM), d'un sens et d'un groupe (all, reporter:FR…). */
 export const recentKey = (k, flow, g, c) => `${k}|${flow}|${g === 'all' ? 'all' : `${g}:${c}`}`;
 
-/** État de la table des dernières déclarations (si les tables sont à jour). */
+/** État de la table des dernières déclarations (si les tables sont utilisables). */
 export async function latestInfo() {
   if (!(await cubesUsable())) return null;
-  const doc = await Meta.findOne({ key: 'cubes' }, { 'info.latest': 1 }).lean();
-  return doc?.info?.latest || null;
+  const info = (await cubeState()).latest;
+  if (!info || info.counts) return info;
+  // Format précédent : seulement le dernier mois, au global
+  if (!info.period) return null;
+  const k = Number(info.period.replace('-', ''));
+  return { ...info, periods: [info.period], top: { all: LATEST_ROWS, reporter: 0, partner: 0 }, counts: { [recentKey(k, 'import', 'all')]: info.byFlow?.import || 0, [recentKey(k, 'export', 'all')]: info.byFlow?.export || 0 } };
 }
 
 /**

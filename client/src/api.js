@@ -22,10 +22,15 @@ export function toQuery(params = {}) {
   return s ? `?${s}` : '';
 }
 
-/** Nombre de requêtes en cours (barre de chargement en haut de page). */
+/**
+ * Nombre de requêtes en cours demandées par l'utilisateur (barre de chargement en haut de page).
+ * Les actualisations automatiques (compteurs, état de préparation…) passent `background: true` :
+ * elles ne font jamais apparaître la barre.
+ */
 export const pending = ref(0);
 
 export async function api(path, opts = {}) {
+  if (opts.background) return request(path, opts);
   pending.value += 1;
   try {
     return await request(path, opts);
@@ -34,12 +39,25 @@ export async function api(path, opts = {}) {
   }
 }
 
+// Au-delà, la requête est abandonnée avec un message clair (jamais de chargement sans fin)
+const TIMEOUT_MS = 120000;
+
 async function request(path, { method = 'GET', body, params, raw = false } = {}) {
   const headers = {};
   const token = tokenStore.get();
   if (token) headers.Authorization = `Bearer ${token}`;
   if (body) headers['Content-Type'] = 'application/json';
-  const res = await fetch(`/api${path}${toQuery(params)}`, { method, headers, body: body ? JSON.stringify(body) : undefined });
+  const ctrl = raw ? null : new AbortController();
+  const timer = ctrl && setTimeout(() => ctrl.abort(), TIMEOUT_MS);
+  let res;
+  try {
+    res = await fetch(`/api${path}${toQuery(params)}`, { method, headers, body: body ? JSON.stringify(body) : undefined, signal: ctrl?.signal });
+  } catch (e) {
+    if (e.name === 'AbortError') throw new Error('Le serveur met trop de temps à répondre : réessayez dans quelques instants.');
+    throw new Error('Connexion au serveur impossible : vérifiez votre connexion et réessayez.');
+  } finally {
+    clearTimeout(timer);
+  }
   if (res.status === 401 && token) {
     tokenStore.set(null);
     window.location.assign('/connexion');
